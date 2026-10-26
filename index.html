@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sleeper Dashboard</title>
+<meta name="description" content="Live Sleeper fantasy dashboard: standings, rosters, matchups, draft order and trade finder.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%2312161f'/><path d='M8 22l5-7 4 4 7-10' stroke='%23b6f36a' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo">◢</span> Sleeper<b>Dash</b></div>
+  <form id="userForm" class="userform" autocomplete="off">
+    <input id="userInput" placeholder="Sleeper username" aria-label="Sleeper username">
+    <select id="leagueSelect" aria-label="League"></select>
+    <button type="submit" id="goBtn">Load</button>
+    <button type="button" id="refreshBtn" title="Refresh data" aria-label="Refresh">↻</button>
+  </form>
+</header>
+<nav class="tabs" id="tabs">
+  <button data-tab="overview" class="on">Overview</button>
+  <button data-tab="alerts">Alerts <span class="nb" id="alertBadge" style="display:none"></span></button>
+  <button data-tab="team">My Team</button>
+  <button data-tab="matchups">Matchups</button>
+  <button data-tab="news">News</button>
+  <button data-tab="trades">Trade Finder</button>
+  <button data-tab="check">Trade Calculator</button>
+  <button data-tab="strategy">Strategy</button>
+  <button data-tab="history">History</button>
+  <button data-tab="teams">Teams</button>
+  <button data-tab="players">Players</button>
+</nav>
+<main id="main">
+  <section class="empty">
+    <h1>Your Sleeper leagues, live.</h1>
+    <p>Enter your Sleeper username above to load standings, rosters, matchups, draft order and trade ideas.</p>
+    <p><a class="demobtn" href="/?demo=1">Try the demo</a></p>
+    <p class="sub">The demo uses a real dynasty league with every team and manager name hidden.</p>
+  </section>
+</main>
+<footer class="foot"><span id="updated"></span> · Data: Sleeper (leagues, stats, projections, trends), FantasyCalc (NFL trade values), ESPN (headlines). Points use each league's own scoring.</footer>
+<script src="/app.js"></script>
+<script src="/alerts.js"></script>
+<script src="/news.js"></script>
+<script src="/trades.js"></script>
+<script src="/history.js"></script>
+<script src="/strategy.js"></script>
+</body>
+</html>
