@@ -146,6 +146,41 @@ const AGENT_TOOLS = {
       from_lineup_change_ppg: r1(c.ev.myLineup), other_lineup_change_ppg: r1(c.ev.thLineup), other_team_mode: MODE_LABEL[teamMode(L, other)],
       would_other_team_accept: c.acc.label, reasons: reasons(L, from, other, c.ev).map(plain) };
   },
+  shop_players(L, a) {
+    if (!L.me) return { error: 'The user has no team in this league.' };
+    const g = resolveItems(L, L.me, a.give);
+    if (g.missing.length) return { error: `Not on the user's roster: ${g.missing.join(', ')}` };
+    if (!g.got.length) return { error: 'Name at least one player or pick to shop.' };
+    let targets = L.standings.filter(t => t.rid !== L.me.rid);
+    if (a.with_team) { const t = findTeam(L, a.with_team); if (!t || t.rid === L.me.rid) return { error: `No other team matching "${a.with_team}".` }; targets = [t]; }
+    const mm = teamMode(L, L.me), vg = pkgVal(g.got), out = [];
+    for (const t of targets) {
+      let get = itemsFor(L, t).filter(i => i.val > 0);
+      get = [...get.filter(i => i.kind === 'p').sort((x, y) => y.val - x.val).slice(0, 12), ...get.filter(i => i.kind === 'k').sort((x, y) => y.val - x.val).slice(0, 4)];
+      const combos = get.map(x => [x]);
+      for (let i = 0; i < get.length; i++) for (let k = i + 1; k < get.length; k++) combos.push([get[i], get[k]]);
+      for (let i = 0; i < Math.min(get.length, 8); i++) for (let k = i + 1; k < Math.min(get.length, 8); k++) for (let m = k + 1; m < Math.min(get.length, 8); m++) combos.push([get[i], get[k], get[m]]);
+      const best = [];
+      for (const r of combos) {
+        const vr = pkgVal(r), pct = (vr - vg) / Math.max(vr, vg, 1);
+        if (pct < -0.1 || pct > 0.25) continue;
+        const ev = evalTrade(L, L.me, t, g.got, r), acc = acceptance(L, t, ev);
+        if (!acc.ok) continue;
+        // a team trying to win this year won't take a big lineup hit unless it's clearly winning on value
+        if (teamMode(L, t) !== 'rebuilder' && ev.thLineup < -2 && -ev.pct < 0.15) continue;
+        const score = pct * 100 + (mm === 'rebuilder' ? ev.picksIn * 5 : ev.myLineup * 4) + Math.min(3, ev.thLineup);
+        best.push({ t, r, ev, acc, score });
+      }
+      best.sort((x, y) => y.score - x.score);
+      out.push(...best.slice(0, 2));
+    }
+    out.sort((x, y) => y.score - x.score);
+    const lim = Math.min(8, Math.max(1, +a.limit || 5));
+    return { shopping: g.got.map(i => i.kind === 'k' ? pickName(L, i.pk, L.me.rid) : i.name), package_value: Math.round(vg), user_mode: MODE_LABEL[mm],
+      offers: out.slice(0, lim).map(o => ({ partner: o.t.name, their_mode: MODE_LABEL[teamMode(L, o.t)], user_gets: o.r.map(i => i.kind === 'k' ? pickName(L, i.pk, o.t.rid) : i.name),
+        value_edge_for_user_pct: Math.round(o.ev.pct * 100), user_lineup_change_ppg: r1(o.ev.myLineup), their_lineup_change_ppg: r1(o.ev.thLineup), likely_accepted: o.acc.label, reasons: reasons(L, L.me, o.t, o.ev).map(plain) })),
+      note: out.length ? undefined : 'No team has a balanced package for exactly these players that they would likely accept. Try fewer players or a different combination.' };
+  },
   async get_player_history(L, a) {
     const id = findPlayerId(L, a.player); if (!id) return { error: `No player matching "${a.player}".` };
     const H = await loadHistory(L) || await new Promise(res => { const iv = setInterval(() => { if (S.hist && S.hist.id === L.league.league_id) { clearInterval(iv); res(S.hist); } }, 300); setTimeout(() => { clearInterval(iv); res(null); }, 20000); });
@@ -177,6 +212,7 @@ function traceLabel(L, c) {
     case 'suggest_trades': return a.with_team ? `Ran the trade engine against ${esc(a.with_team)}` : 'Ran the trade engine across the league';
     case 'evaluate_trade': return `Checked a trade: ${esc((a.give || []).join(' + '))} for ${esc((a.get || []).join(' + '))}`;
     case 'get_player_history': return `Traced ${esc(a.player)}’s history`;
+    case 'shop_players': return `Shopped ${esc((a.give || []).join(' + '))} around the league`;
     case 'get_lineup_alerts': return 'Checked your lineup for problems';
     case 'get_matchups': return 'Read this week’s matchups';
     case 'submit_gm_plan': return 'Wrote the plan';
@@ -188,6 +224,7 @@ function traceResult(c, res) {
   if (res.error) return `<span class="bad">${esc(res.error)}</span>`;
   switch (c.name) {
     case 'suggest_trades': return `${res.trades.length} candidate trade${res.trades.length === 1 ? '' : 's'}`;
+    case 'shop_players': return `${res.offers.length} offer${res.offers.length === 1 ? '' : 's'}`;
     case 'evaluate_trade': return `${esc(res.grade)} · ${res.edge_pct >= 0 ? '+' : ''}${res.edge_pct}% value · ${esc(res.would_other_team_accept)}`;
     case 'get_team_strategy': return `${esc(res.verdict)} · value rank ${esc(res.roster_value_rank)}`;
     case 'find_players': return `${res.results.length} found`;
@@ -267,8 +304,9 @@ async function gmChat(L, question) {
   const st = gmState(L);
   if (st.busy || !question.trim()) return;
   st.busy = true;
-  const ctx = st.plan ? `Context — the GM plan you produced for me:\n${JSON.stringify({ goal: st.plan.goal, verdict: st.plan.verdict, reasoning: st.plan.reasoning, trades: (st.plan.trades || []).map(t => ({ partner: t.partner, give: t.give, get: t.get, verified: t.check && !t.check.error ? `${t.check.grade}, ${t.check.acc.label}` : 'not verified' })), waiver_adds: st.plan.waiver_adds, lineup_fixes: st.plan.lineup_fixes })}\n\n` : '';
-  st.chatMsgs.push({ role: 'user', text: (st.chatMsgs.length ? '' : ctx) + question.trim() });
+  const ctx = st.plan ? `Context (the GM plan you produced for me earlier):\n${JSON.stringify({ goal: st.plan.goal, verdict: st.plan.verdict, reasoning: st.plan.reasoning, trades: (st.plan.trades || []).map(t => ({ partner: t.partner, give: t.give, get: t.get, verified: t.check && !t.check.error ? `${t.check.grade}, ${t.check.acc.label}` : 'not verified' })), waiver_adds: st.plan.waiver_adds, lineup_fixes: st.plan.lineup_fixes })}\n\n` : '';
+  // question first, plan context after, so the question can never be cut off by the server's length limit
+  st.chatMsgs.push({ role: 'user', text: question.trim() + (st.chatMsgs.length || !ctx ? '' : `\n\n---\n${ctx}`) });
   const turn = { q: question.trim(), a: '', tools: [] }; st.chat.push(turn);
   gmPaint();
   try {
@@ -303,7 +341,7 @@ function mdLite(s) {
   }
   return html + (inList ? '</ul>' : '');
 }
-const TOOL_SHORT = { get_league_overview: 'standings', scan_league_needs: 'league needs', get_team_roster: 'roster', get_team_strategy: 'strategy', find_players: 'player search', suggest_trades: 'trade engine', evaluate_trade: 'trade check', get_player_history: 'history', get_lineup_alerts: 'lineup', get_matchups: 'matchups' };
+const TOOL_SHORT = { get_league_overview: 'standings', scan_league_needs: 'league needs', get_team_roster: 'roster', get_team_strategy: 'strategy', find_players: 'player search', suggest_trades: 'trade engine', evaluate_trade: 'trade check', shop_players: 'shop players', get_player_history: 'history', get_lineup_alerts: 'lineup', get_matchups: 'matchups' };
 function traceHtml(st) {
   if (!st.trace.length && !st.busy) return '';
   const items = st.trace.map(s => s.kind === 'think'
