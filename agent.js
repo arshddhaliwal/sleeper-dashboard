@@ -5,7 +5,7 @@
    runs here in the browser against the loaded league. */
 
 const GM_MAX_ROUNDS = 16, CHAT_MAX_ROUNDS = 8;
-const AGENT_VERSION = '2026-10-28.4'; // must match api/agent.js; a mismatch means this tab is running an old copy of the app
+const AGENT_VERSION = '2026-10-28.5'; // must match api/agent.js; a mismatch means this tab is running an old copy of the app
 
 const plain = s => { const d = document.createElement('div'); d.innerHTML = String(s == null ? '' : s).replace(/<[^>]+>/g, ' '); return d.textContent.replace(/\s+/g, ' ').trim(); };
 const r1 = n => n == null || isNaN(n) ? null : Math.round(n * 10) / 10;
@@ -132,10 +132,10 @@ const AGENT_TOOLS = {
       with_team: o.t.name, their_mode: MODE_LABEL[teamMode(L, o.t)],
       user_gives: o.g.map(i => i.kind === 'k' ? pickName(L, i.pk, L.me.rid) : i.name), user_gets: o.r.map(i => i.kind === 'k' ? pickName(L, i.pk, o.t.rid) : i.name),
       value_edge_for_user_pct: Math.round(o.ev.pct * 100), user_lineup_change_ppg: r1(o.ev.myLineup), their_lineup_change_ppg: r1(o.ev.thLineup),
-      likely_accepted: o.acc.label, reasons: reasons(L, L.me, o.t, o.ev).map(plain) })),
+      likely_accepted: o.acc.label, reasons: reasons(L, L.me, o.t, o.ev).map(plain), warnings: (o.r.filter(i => i.kind === 'p').flatMap(i => riskSync(L, i.id, 'get')).concat(o.g.filter(i => i.kind === 'p').flatMap(i => riskSync(L, i.id, 'give').filter(w => w.sev === 'high'))).map(w => `[${w.sev}] ${w.text}`)) })),
       note: all.length ? undefined : 'No balanced trades found with these teams.' };
   },
-  evaluate_trade(L, a) {
+  async evaluate_trade(L, a) {
     const from = a.from_team ? findTeam(L, a.from_team) : L.me, other = findTeam(L, a.other_team);
     if (!from) return { error: 'Could not tell which team gives the first side.' };
     if (!other || other.rid === from.rid) return { error: `No other team matching "${a.other_team}".` };
@@ -145,7 +145,8 @@ const AGENT_TOOLS = {
       gets: c.r.map(i => ({ item: i.kind === 'k' ? pickName(L, i.pk, other.rid) : i.name, value: Math.round(i.val) })),
       package_value_given: Math.round(c.ev.vGive), package_value_received: Math.round(c.ev.vGet), edge_pct: Math.round(c.ev.pct * 100), grade: c.grade,
       from_lineup_change_ppg: r1(c.ev.myLineup), other_lineup_change_ppg: r1(c.ev.thLineup), other_team_mode: MODE_LABEL[teamMode(L, other)],
-      would_other_team_accept: c.acc.label, reasons: reasons(L, from, other, c.ev).map(plain) };
+      would_other_team_accept: c.acc.label, reasons: reasons(L, from, other, c.ev).map(plain),
+      risk_check: await riskReport(L, { get: c.r.filter(i => i.kind === 'p').map(i => i.id), give: c.g.filter(i => i.kind === 'p').map(i => i.id) }) };
   },
   shop_players(L, a) {
     if (!L.me) return { error: 'The user has no team in this league.' };
@@ -179,7 +180,7 @@ const AGENT_TOOLS = {
     const lim = Math.min(8, Math.max(1, +a.limit || 5));
     return { shopping: g.got.map(i => i.kind === 'k' ? pickName(L, i.pk, L.me.rid) : i.name), package_value: Math.round(vg), user_mode: MODE_LABEL[mm],
       offers: out.slice(0, lim).map(o => ({ partner: o.t.name, their_mode: MODE_LABEL[teamMode(L, o.t)], user_gets: o.r.map(i => i.kind === 'k' ? pickName(L, i.pk, o.t.rid) : i.name),
-        value_edge_for_user_pct: Math.round(o.ev.pct * 100), user_lineup_change_ppg: r1(o.ev.myLineup), their_lineup_change_ppg: r1(o.ev.thLineup), likely_accepted: o.acc.label, reasons: reasons(L, L.me, o.t, o.ev).map(plain) })),
+        value_edge_for_user_pct: Math.round(o.ev.pct * 100), user_lineup_change_ppg: r1(o.ev.myLineup), their_lineup_change_ppg: r1(o.ev.thLineup), likely_accepted: o.acc.label, reasons: reasons(L, L.me, o.t, o.ev).map(plain), warnings: (o.r.filter(i => i.kind === 'p').flatMap(i => riskSync(L, i.id, 'get')).concat(o.g.filter(i => i.kind === 'p').flatMap(i => riskSync(L, i.id, 'give').filter(w => w.sev === 'high'))).map(w => `[${w.sev}] ${w.text}`)) })),
       note: out.length ? undefined : 'No team has a balanced package for exactly these players that they would likely accept. Try fewer players or a different combination.' };
   },
   async get_player_history(L, a) {
@@ -210,6 +211,13 @@ const AGENT_TOOLS = {
       headlines: hits.map(n => ({ headline: n.h, summary: n.d, players: (n.ath || []).map(x => byEspn[String(x)] && byEspn[String(x)].name).filter(Boolean) })),
       note: hits.length ? undefined : 'No recent ESPN headlines for these players.' };
   },
+  async check_player_risks(L, a) {
+    const ids = [], missing = [];
+    for (const n of a.players || []) { const id = findPlayerId(L, n); if (id) ids.push(id); else missing.push(n); }
+    if (!ids.length) return { error: `No players matching ${missing.join(', ')}` };
+    const side = a.side === 'give' ? 'give' : 'get';
+    return { players: await riskReport(L, side === 'get' ? { get: ids } : { give: ids }), not_found: missing.length ? missing : undefined };
+  },
   get_lineup_alerts(L) {
     if (!L.me) return { error: 'The user has no team in this league.' };
     return { alerts: computeAlerts(L).map(x => ({ severity: SEV[x.sev].label, title: x.title, detail: x.detail })) };
@@ -235,6 +243,7 @@ function traceLabel(L, c) {
     case 'get_player_history': return `Traced ${esc(a.player)}’s history`;
     case 'shop_players': return `Shopped ${esc((a.give || []).join(' + '))} around the league`;
     case 'get_draft_order': return 'Projected the draft order';
+    case 'check_player_risks': return `Checked injuries, depth charts and news for ${esc((a.players || []).join(', '))}`;
     case 'get_player_news': return a.player ? `Read news on ${esc(a.player)}` : 'Read news on your roster';
     case 'get_lineup_alerts': return 'Checked your lineup for problems';
     case 'get_matchups': return 'Read this week’s matchups';
@@ -268,7 +277,7 @@ function gmState(L) {
   if (!S.gm || S.gm.league !== L.league.league_id) {
     S.gm = { league: L.league.league_id, goal: 'auto', trace: [], plan: null, busy: false, chat: [], chatMsgs: [], usage: { turns: 0, tools: 0, in: 0, out: 0, cached: 0 } };
     const saved = store.get('sd_gm_' + L.league.league_id, null); // last plan for this league survives a refresh
-    if (saved && saved.plan && saved.v === AGENT_VERSION) { S.gm.plan = verifyPlan(L, saved.plan); S.gm.goal = saved.goal || 'auto'; S.gm.savedAt = saved.at; }
+    if (saved && saved.plan && saved.v === AGENT_VERSION) { S.gm.plan = verifyPlan(L, saved.plan); S.gm.goal = saved.goal || 'auto'; S.gm.savedAt = saved.at; riskNews(L, (S.gm.plan.trades || []).flatMap(t => t.check && !t.check.error ? [...t.check.give, ...t.check.get] : [])).then(() => gmPaint()); }
   }
   return S.gm;
 }
@@ -357,6 +366,8 @@ async function gmRun(L) {
     }
     if (!st.plan) throw new Error('The agent ran out of steps before finishing a plan. Try again or pick a narrower goal.');
     st.gmMsgs = msgs; st.savedAt = null; gmSave(L, st);
+    const ids = (st.plan.trades || []).flatMap(t => t.check && !t.check.error ? [...t.check.give, ...t.check.get] : []);
+    riskNews(L, ids).then(() => gmPaint());
   } catch (e) { st.error = String(e.message || e); }
   st.busy = false;
   gmPaint();
@@ -402,7 +413,7 @@ function mdLite(s) {
   }
   return html + (inList ? '</ul>' : '');
 }
-const TOOL_SHORT = { get_league_overview: 'standings', scan_league_needs: 'league needs', get_team_roster: 'roster', get_team_strategy: 'strategy', find_players: 'player search', suggest_trades: 'trade engine', evaluate_trade: 'trade check', shop_players: 'shop players', get_draft_order: 'draft order', get_player_news: 'news', get_player_history: 'history', get_lineup_alerts: 'lineup', get_matchups: 'matchups' };
+const TOOL_SHORT = { get_league_overview: 'standings', scan_league_needs: 'league needs', get_team_roster: 'roster', get_team_strategy: 'strategy', find_players: 'player search', suggest_trades: 'trade engine', evaluate_trade: 'trade check', shop_players: 'shop players', get_draft_order: 'draft order', get_player_news: 'news', check_player_risks: 'risk check', get_player_history: 'history', get_lineup_alerts: 'lineup', get_matchups: 'matchups' };
 function traceHtml(st) {
   if (!st.trace.length && !st.busy) return '';
   const items = st.trace.map(s => s.kind === 'think'
@@ -421,6 +432,7 @@ function planHtml(L, st) {
       ${c.error ? `<div class="sub bad">Verification: ${esc(c.error)}</div>` : `<div class="sub">Checked by the app: ${c.pct >= 0 ? '+' : ''}${Math.round(c.pct * 100)}% value · your lineup ${c.my >= 0 ? '+' : ''}${f1(c.my)}/g · theirs ${c.th >= 0 ? '+' : ''}${f1(c.th)}/g</div>`}
       <p>${esc(t.why || '')}</p>
       ${t.pitch ? `<div class="pitch"><span class="sub">Message to send</span><div>“${esc(t.pitch)}”</div></div>` : ''}
+      ${c.error ? '' : riskHtml(L, { get: c.rv.filter(x => x.kind === 'p').map(x => x.id), give: c.gv.filter(x => x.kind === 'p').map(x => x.id) })}
       ${c.error ? '' : `<button class="linkbtn" data-gmcalc="${i}">Open in Trade Calculator →</button>`}</div>`;
   }).join('');
   const list = (title, arr, fmt) => arr && arr.length ? `<div class="gmsec"><h3>${title}</h3><ul>${arr.map(x => `<li>${fmt(x)}</li>`).join('')}</ul></div>` : '';

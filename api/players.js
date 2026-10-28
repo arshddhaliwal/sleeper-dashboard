@@ -1,5 +1,5 @@
 // Slim proxy for Sleeper's ~15MB player database.
-// Returns { id: [name, positions, team, age, years_exp, injury_status, body_part, news_updated, espn_id, practice] }.
+// Returns { id: [name, positions, team, age, years_exp, injury_status, body_part, news_updated, espn_id, practice, depth_chart_position, depth_chart_order] }.
 module.exports = async (req, res) => {
   const sport = req.query && req.query.sport === 'nba' ? 'nba' : 'nfl';
   try {
@@ -13,7 +13,8 @@ module.exports = async (req, res) => {
       if (!pos.length) continue;
       const name = p.full_name || [p.first_name, p.last_name].filter(Boolean).join(' ') || id;
       out[id] = [name, pos.join('/'), p.team || '', p.age || null, p.years_exp == null ? null : p.years_exp,
-        p.injury_status || '', p.injury_body_part || '', p.news_updated || 0, p.espn_id || null, p.practice_participation || ''];
+        p.injury_status || '', p.injury_body_part || '', p.news_updated || 0, p.espn_id || null, p.practice_participation || '',
+        p.depth_chart_position || '', p.depth_chart_order || null];
     }
     // injury statuses change often; keep the edge copy fresh
     res.setHeader('Cache-Control', 'public, s-maxage=900, stale-while-revalidate=3600');

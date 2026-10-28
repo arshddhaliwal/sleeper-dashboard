@@ -166,7 +166,7 @@ function build(d) {
     const a = P[id];
     if (!a) return { id, name: /^[A-Z]{2,3}$/.test(id) ? id + ' D/ST' : id, pos: /^[A-Z]{2,3}$/.test(id) ? 'DEF' : '?', positions: ['DEF'], team: /^[A-Z]{2,3}$/.test(id) ? id : '', age: null, exp: null, inj: '', body: '', newsAt: 0, espn: null, practice: '' };
     const positions = a[1].split('/');
-    return { id, name: a[0], pos: positions[0], positions, team: a[2], age: a[3], exp: a[4], inj: a[5], body: a[6] || '', newsAt: a[7] || 0, espn: a[8] ? String(a[8]) : null, practice: a[9] || '' };
+    return { id, name: a[0], pos: positions[0], positions, team: a[2], age: a[3], exp: a[4], inj: a[5], body: a[6] || '', newsAt: a[7] || 0, espn: a[8] ? String(a[8]) : null, practice: a[9] || '', depthPos: a[10] || '', depth: a[11] || null };
   };
   // weekly league-official points
   const weekly = {};
@@ -246,7 +246,7 @@ function build(d) {
   const weekPts = d.mus.map((arr, i) => ({ w: d.weeks[i], pts: Object.fromEntries((arr || []).filter(m => m.matchup_id).map(m => [m.roster_id, m.points || 0])) }))
     .filter(x => x.w < d.curWeek && Object.values(x.pts).some(v => v > 0)).map(x => x.pts);
   return { league, sport, teams, byRid, me, owner, slots, player, standings, picks, cur, weeks: d.weeks, curWeek: d.curWeek, stats: d.stats, scoring: sc, kind, hasPicks, maxKeepers, usesKeepers, keepRule, setK, weekPts,
-    values: d.values, haveSched, trendAdd: d.trendAdd || [], trendDrop: d.trendDrop || [], addRank: rank(d.trendAdd), dropRank: rank(d.trendDrop), proj: d.proj };
+    values: d.values, schedule: d.schedule || [], pids: Object.keys(P), haveSched, trendAdd: d.trendAdd || [], trendDrop: d.trendDrop || [], addRank: rank(d.trendAdd), dropRank: rank(d.trendDrop), proj: d.proj };
 }
 
 function computePicks(league, teams, traded) {
