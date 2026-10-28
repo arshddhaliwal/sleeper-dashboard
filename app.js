@@ -284,7 +284,7 @@ function activePids(L, t) { return t.players.filter(p => !t.reserve.has(p) && !t
 function render() {
   markTab();
   if (!S.L) return;
-  const fn = { overview: vOverview, alerts: vAlerts, team: vTeam, matchups: vMatchups, teams: vTeams, trades: vTrades, check: vCheck, news: vNews, players: vPlayers, history: vHistory, strategy: vStrategy }[S.tab] || vOverview;
+  const fn = { overview: vOverview, alerts: vAlerts, team: vTeam, matchups: vMatchups, teams: vTeams, trades: vTrades, check: vCheck, news: vNews, players: vPlayers, history: vHistory, strategy: vStrategy, gm: vGm }[S.tab] || vOverview;
   setMain(fn(S.L));
   bind();
 }
@@ -521,6 +521,7 @@ function bind() {
   const pp = $('#pposSel'); if (pp) pp.onchange = () => { S.ui.ppos = pp.value; render(); };
   if (typeof bindModules === 'function') bindModules();
   if (typeof bindExtra === 'function') bindExtra();
+  if (typeof bindGm === 'function') bindGm();
   const pq = $('#pq'); if (pq) pq.oninput = debounce(() => { S.ui.pq = pq.value; render(); const n = $('#pq'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); }, 250);
 }
 function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
