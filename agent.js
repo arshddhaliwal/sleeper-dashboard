@@ -257,7 +257,28 @@ async function agentTurn(L, mode, msgs, st) {
 async function runTool(L, c) {
   try { return AGENT_TOOLS[c.name] ? await AGENT_TOOLS[c.name](L, c.args || {}) : { error: 'unknown tool' }; } catch (e) { return { error: String(e.message || e) }; }
 }
+// Models occasionally return an array field as a string or a JSON-encoded string; normalise before rendering.
+function asArray(v) {
+  if (Array.isArray(v)) return v;
+  if (v == null || v === '') return [];
+  if (typeof v === 'string') {
+    const t = v.trim();
+    if (t.startsWith('[')) { try { const j = JSON.parse(t); if (Array.isArray(j)) return j; } catch { } }
+    return t.split(/\n+|;\s+/).map(x => x.replace(/^\s*(?:[-*•]|\d+\.)\s*/, '').trim()).filter(Boolean);
+  }
+  return typeof v === 'object' ? [v] : [String(v)];
+}
+function normalizePlan(p) {
+  p = p && typeof p === 'object' ? p : {};
+  ['trades', 'waiver_adds', 'lineup_fixes', 'watch_list'].forEach(k => p[k] = asArray(p[k]));
+  p.trades = p.trades.filter(t => t && typeof t === 'object').map(t => ({ ...t, give: asArray(t.give).flatMap(x => String(x).split(/\s*(?:,|\+| and )\s*/)).filter(Boolean), get: asArray(t.get).flatMap(x => String(x).split(/\s*(?:,|\+| and )\s*/)).filter(Boolean) }));
+  p.waiver_adds = p.waiver_adds.map(w => typeof w === 'string' ? { add: w, why: '' } : w);
+  p.lineup_fixes = p.lineup_fixes.map(x => typeof x === 'string' ? x : JSON.stringify(x));
+  p.watch_list = p.watch_list.map(x => typeof x === 'string' ? x : JSON.stringify(x));
+  return p;
+}
 function verifyPlan(L, plan) {
+  plan = normalizePlan(plan);
   (plan.trades || []).forEach(t => {
     const other = findTeam(L, t.partner);
     if (!L.me || !other || other.rid === L.me.rid) { t.check = { error: `Unknown partner "${t.partner}"` }; return; }
@@ -383,7 +404,7 @@ function gmBodyHtml(L, st) {
 function gmPaint() {
   const box = $('#gmBody'); if (!box || !S.gm || !S.L) { if (S.tab === 'gm') render(); return; }
   const keepOpen = box.querySelector('details.trace') && box.querySelector('details.trace').open;
-  box.innerHTML = gmBodyHtml(S.L, S.gm);
+  try { box.innerHTML = gmBodyHtml(S.L, S.gm); } catch (e) { box.innerHTML = `<div class="alert crit"><span class="sev">Error</span><div><div class="at">Couldn’t display the plan: ${esc(e.message)}</div></div></div>`; }
   if (keepOpen && !S.gm.plan) { const d = box.querySelector('details.trace'); if (d) d.open = true; }
   const run = $('#gmRun'); if (run) { run.disabled = S.gm.busy; run.textContent = S.gm.busy ? 'Working…' : S.gm.plan ? 'Run again' : 'Run GM agent'; }
   const stop = $('#gmStop'); if (stop) stop.style.display = S.gm.busy ? '' : 'none';
