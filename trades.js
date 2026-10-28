@@ -203,6 +203,7 @@ function tradeRow(L, me, o, i) {
       <div class="tside"><div class="sub">You give</div><div class="need">${o.g.map(itemChip).join('')}</div></div>
       <div class="tside"><div class="sub">You get</div><div class="need">${o.r.map(itemChip).join('')}</div></div>
       ${rs.length ? `<ul class="why">${rs.map(x => `<li>${x}</li>`).join('')}</ul>` : ''}
+      ${typeof riskHtml === 'function' ? riskHtml(L, { get: o.r.filter(x => x.kind === 'p').map(x => x.id), give: o.g.filter(x => x.kind === 'p').map(x => x.id) }, { compact: true }) : ''}
       <button class="linkbtn" data-open-check="${o.t.rid}" data-give="${o.g.map(x => x.id).join(',')}" data-get="${o.r.map(x => x.id).join(',')}">Open in calculator →</button>
     </div></details>`;
 }
@@ -231,7 +232,11 @@ function vCheck(L) {
       <div class="kpis" style="margin-top:12px"><div class="kpi"><div class="l">${isMe ? 'Your' : esc(me.name)} lineup</div><div class="v ${ev.myLineup >= 0 ? 'good' : 'bad'}">${ev.myLineup >= 0 ? '+' : ''}${f1(ev.myLineup)}</div><div class="s">pts/g at season pace</div></div>
       <div class="kpi"><div class="l">Their lineup</div><div class="v ${ev.thLineup >= 0 ? 'good' : 'bad'}">${ev.thLineup >= 0 ? '+' : ''}${f1(ev.thLineup)}</div><div class="s">pts/g at season pace</div></div>
       <div class="kpi"><div class="l">Would they accept?</div><div class="v" style="font-size:18px">${acc.label}</div><div class="s">${MODE_LABEL[teamMode(L, them)]} team</div></div></div>
-      ${rs.length ? `<ul class="why">${rs.map(x => `<li>${x}</li>`).join('')}</ul>` : ''}`;
+      ${rs.length ? `<ul class="why">${rs.map(x => `<li>${x}</li>`).join('')}</ul>` : ''}
+      ${typeof riskHtml === 'function' ? riskHtml(L, { get: get.filter(x => x.kind === 'p').map(x => x.id), give: give.filter(x => x.kind === 'p').map(x => x.id) }) : ''}`;
+    // fetch the latest player notes once, then redraw so return timelines show up
+    if (typeof riskNews === 'function') { const ids = [...give, ...get].filter(x => x.kind === 'p').map(x => x.id), key = ids.sort().join(',');
+      if (S._riskKey !== key) { S._riskKey = key; riskNews(L, ids).then(() => { if (S.tab === 'check' && S._riskKey === key) { const y = window.scrollY; render(); window.scrollTo(0, y); } }); } }
   }
   return `<div class="controls"><label>Team A</label><select id="chkA">${L.standings.map(t => `<option value="${t.rid}" ${t.rid === me.rid ? 'selected' : ''}>${L.me && t.rid === L.me.rid ? 'You — ' : ''}${esc(t.name)} (${rec(t)})</option>`).join('')}</select>
     <label>Team B</label><select id="chkTeam">${others.map(t => `<option value="${t.rid}" ${t.rid === them.rid ? 'selected' : ''}>${esc(t.name)} (${rec(t)})</option>`).join('')}</select>

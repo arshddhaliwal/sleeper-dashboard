@@ -208,6 +208,9 @@ details summary{cursor:pointer;color:var(--mute);font-size:13px;margin-top:10px}
 .gmsides{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px}.gmsides .arrow{font-size:18px}
 .gmtrade p{margin:8px 0}
 .pitch{background:var(--panel);border:1px dashed var(--line);border-radius:10px;padding:8px 10px;margin:8px 0;font-size:13px}
+.risks{margin:8px 0;padding:8px 10px;border-radius:10px;background:color-mix(in srgb,var(--warn) 9%,var(--panel));border:1px solid color-mix(in srgb,var(--warn) 35%,var(--line))}
+.risks ul{margin:4px 0 0;padding-left:4px;list-style:none}.risks li{margin:3px 0;font-size:13px;line-height:1.4}
+.risks .risk-high{color:var(--text);font-weight:600}.risks .risk-med{color:var(--text)}.risks .risk-info{color:var(--mute)}
 @media (max-width:640px){.tr-meta{flex-direction:column;align-items:flex-end}.tr-body{padding-left:0}}
 @media (max-width:640px){
   .top{padding:12px 16px;flex-direction:column;align-items:stretch} main{padding:16px} .userform{justify-content:flex-start}

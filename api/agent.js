@@ -9,7 +9,7 @@
 // Neutral message format sent by the browser:
 //   { role: 'user', text } | { role: 'assistant', text?, calls?: [{ id, name, args }] } | { role: 'tool', id, name, result }
 
-const VERSION = '2026-10-28.4'; // must match AGENT_VERSION in agent.js
+const VERSION = '2026-10-28.5'; // must match AGENT_VERSION in agent.js
 
 const TOOLS = [
   { name: 'get_league_overview', description: 'League type (dynasty / keeper / redraft), scoring, settings, the standings (rank, record, points, max points, contend-or-rebuild verdict, roster value rank) and which team is the user\'s.', params: {} },
@@ -23,6 +23,7 @@ const TOOLS = [
   { name: 'get_player_history', description: 'How a player reached his current team: drafts, trades, waiver claims and drops across up to four seasons.', params: { player: { type: 'string' } }, required: ['player'] },
   { name: 'get_draft_order', description: 'Projected order of next year\'s draft if the season ended today, and who owns each first-round pick. Dynasty and keeper leagues only.', params: {} },
   { name: 'get_player_news', description: 'Recent ESPN headlines and current injury/practice status, for one player or (if none given) for the user\'s whole roster.', params: { player: { type: 'string', description: 'Player name (optional)' } } },
+  { name: 'check_player_risks', description: 'Risk check for specific players: injury and practice status, depth-chart role (e.g. a backup whose production depends on an injured starter), latest player note with any return timeline, upcoming bye, age cliff, falling market value, and whether Sleeper users are dropping him.', params: { players: { type: 'array', items: { type: 'string' } }, side: { type: 'string', description: '"get" if the user would receive them (default), "give" if sending them' } }, required: ['players'] },
   { name: 'get_lineup_alerts', description: 'Problems in the user\'s lineup this week: injured/doubtful/bye starters, empty slots, better bench options, IR moves, hot free agents.', params: {} },
   { name: 'get_matchups', description: 'This week\'s matchups with current scores, projected finals and players left.', params: {} }
 ];
@@ -57,6 +58,7 @@ Ground rules:
 - Team and manager names may be anonymised in demo mode; use them exactly as tools return them.
 - Only discuss this league and fantasy sports.
 - Never mention tool or function names to the user, and never describe your internal process ("I ran X"). Just give the answer in plain fantasy terms.
+- Trade results include "warnings" and a "risk_check". Always tell the user about high and medium warnings on the players in a trade you discuss: injuries and return timelines from the latest note, backups whose numbers depend on an injured starter (and what happens when the starter returns), byes, age, and falling value. Don't recommend a trade whose main piece has a high warning without saying so plainly, and prefer an alternative when one exists.
 - If a tool returns an error, try another way to get the answer (a different tool, a corrected name) before telling the user you can't.`;
 
 const GM_PROMPT = `${BASE_RULES}
