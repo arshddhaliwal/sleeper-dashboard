@@ -4,7 +4,8 @@
    and returns a structured plan. Then you can ask follow-up questions. The model runs on /api/agent; every tool
    runs here in the browser against the loaded league. */
 
-const GM_MAX_ROUNDS = 14, CHAT_MAX_ROUNDS = 6;
+const GM_MAX_ROUNDS = 16, CHAT_MAX_ROUNDS = 8;
+const AGENT_VERSION = '2026-10-28.4'; // must match api/agent.js; a mismatch means this tab is running an old copy of the app
 
 const plain = s => { const d = document.createElement('div'); d.innerHTML = String(s == null ? '' : s).replace(/<[^>]+>/g, ' '); return d.textContent.replace(/\s+/g, ' ').trim(); };
 const r1 = n => n == null || isNaN(n) ? null : Math.round(n * 10) / 10;
@@ -189,6 +190,26 @@ const AGENT_TOOLS = {
     return { player: p.name, pos: p.pos, now_on: L.owner[id] ? teamRef(L, L.byRid[L.owner[id]]) : 'free agent', seasons_covered: H.seasons,
       timeline: evs.map(e => ({ date: fmtDate(e.t), season: e.season, event: plain(eventLine(L, H, e)) })), note: evs.length ? undefined : 'No records in the seasons covered.' };
   },
+  get_draft_order(L, a) {
+    if (!L.hasPicks) return { error: 'This league has no future draft picks (redraft).' };
+    const rule = store.get('sd_rule_' + L.league.league_id, 'maxpf');
+    const { order, playoff } = draftOrder(L, rule), y = L.picks.seasons[0];
+    return { season: y, rule: rule === 'maxpf' ? 'non-playoff teams by lowest max points, then playoff teams in reverse standings' : rule === 'pf' ? 'non-playoff teams by lowest points for' : 'worst record first',
+      projected_order: order.map((t, i) => { const o = L.picks.own[`${y}|1|${t.rid}`]; return { pick: i + 1, original_team: teamRef(L, t), record: rec(t), in_playoff_spot: playoff.has(t.rid), first_round_pick_owned_by: o && o !== t.rid && L.byRid[o] ? teamRef(L, L.byRid[o]) : 'original team' }; }) };
+  },
+  async get_player_news(L, a) {
+    if (!S.news || S.news.sport !== L.sport) { await loadNews(L.sport); const t0 = Date.now(); while ((!S.news || S.news.sport !== L.sport) && Date.now() - t0 < 8000) await new Promise(r => setTimeout(r, 250)); }
+    const items = (S.news && S.news.sport === L.sport && S.news.items) || [];
+    let ids;
+    if (a.player) { const id = findPlayerId(L, a.player); if (!id) return { error: `No player matching "${a.player}".` }; ids = [id]; }
+    else ids = L.me ? L.me.players : [];
+    const byEspn = {}; ids.forEach(id => { const p = L.player(id); if (p.espn) byEspn[p.espn] = p; });
+    const hits = items.filter(n => (n.ath || []).some(x => byEspn[String(x)])).slice(0, 10);
+    const inj = ids.map(L.player).filter(p => p.inj).map(p => `${p.name}: ${p.inj}${p.body ? ' (' + p.body + ')' : ''}${p.practice ? ', practice: ' + p.practice : ''}`);
+    return { scope: a.player ? L.player(ids[0]).name : 'user roster', injuries: inj,
+      headlines: hits.map(n => ({ headline: n.h, summary: n.d, players: (n.ath || []).map(x => byEspn[String(x)] && byEspn[String(x)].name).filter(Boolean) })),
+      note: hits.length ? undefined : 'No recent ESPN headlines for these players.' };
+  },
   get_lineup_alerts(L) {
     if (!L.me) return { error: 'The user has no team in this league.' };
     return { alerts: computeAlerts(L).map(x => ({ severity: SEV[x.sev].label, title: x.title, detail: x.detail })) };
@@ -213,6 +234,8 @@ function traceLabel(L, c) {
     case 'evaluate_trade': return `Checked a trade: ${esc((a.give || []).join(' + '))} for ${esc((a.get || []).join(' + '))}`;
     case 'get_player_history': return `Traced ${esc(a.player)}’s history`;
     case 'shop_players': return `Shopped ${esc((a.give || []).join(' + '))} around the league`;
+    case 'get_draft_order': return 'Projected the draft order';
+    case 'get_player_news': return a.player ? `Read news on ${esc(a.player)}` : 'Read news on your roster';
     case 'get_lineup_alerts': return 'Checked your lineup for problems';
     case 'get_matchups': return 'Read this week’s matchups';
     case 'submit_gm_plan': return 'Wrote the plan';
@@ -242,14 +265,31 @@ async function gmStatus() {
   return S.gmStatus;
 }
 function gmState(L) {
-  if (!S.gm || S.gm.league !== L.league.league_id) S.gm = { league: L.league.league_id, goal: 'auto', trace: [], plan: null, busy: false, chat: [], chatMsgs: [], usage: { turns: 0, tools: 0, in: 0, out: 0, cached: 0 } };
+  if (!S.gm || S.gm.league !== L.league.league_id) {
+    S.gm = { league: L.league.league_id, goal: 'auto', trace: [], plan: null, busy: false, chat: [], chatMsgs: [], usage: { turns: 0, tools: 0, in: 0, out: 0, cached: 0 } };
+    const saved = store.get('sd_gm_' + L.league.league_id, null); // last plan for this league survives a refresh
+    if (saved && saved.plan && saved.v === AGENT_VERSION) { S.gm.plan = verifyPlan(L, saved.plan); S.gm.goal = saved.goal || 'auto'; S.gm.savedAt = saved.at; }
+  }
   return S.gm;
+}
+function gmSave(L, st) {
+  if (!st.plan) return;
+  const plan = JSON.parse(JSON.stringify(st.plan)); (plan.trades || []).forEach(t => delete t.check);
+  store.set('sd_gm_' + L.league.league_id, { v: AGENT_VERSION, at: Date.now(), goal: st.goal, plan });
 }
 async function agentTurn(L, mode, msgs, st) {
   if (st.stop) throw new Error('Stopped.');
-  const r = await fetch('/api/agent', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ mode, messages: msgs, context: { league: L.league.name.trim(), sport: L.sport, kind: L.kind, week: L.curWeek, demo: !!S.demo } }) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || `Server error ${r.status}`);
+  const body = JSON.stringify({ mode, version: AGENT_VERSION, tools: Object.keys(AGENT_TOOLS), messages: msgs, context: { league: L.league.name.trim(), sport: L.sport, kind: L.kind, week: L.curWeek, demo: !!S.demo } });
+  let r, j;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { r = await fetch('/api/agent', { method: 'POST', headers: { 'content-type': 'application/json' }, body }); j = await r.json().catch(() => ({})); }
+    catch (e) { r = null; j = { error: 'Network error. Check your connection.' }; }
+    if (r && r.ok) break;
+    if (r && r.status < 500 && r.status !== 429) break; // not worth retrying
+    if (attempt < 2) await new Promise(res => setTimeout(res, 1500 * (attempt + 1)));
+  }
+  if (!r || !r.ok) throw new Error((j && j.error) || `Server error ${r ? r.status : ''}`);
+  if (j.version && j.version !== AGENT_VERSION && !S.gmStale) { S.gmStale = true; const b = $('#gmStale'); if (b) b.style.display = ''; }
   st.usage.turns++;
   if (j.usage) { st.usage.in += j.usage.in || 0; st.usage.out += j.usage.out || 0; st.usage.cached += j.usage.cached || 0; }
   return j;
@@ -316,7 +356,7 @@ async function gmRun(L) {
       }
     }
     if (!st.plan) throw new Error('The agent ran out of steps before finishing a plan. Try again or pick a narrower goal.');
-    st.gmMsgs = msgs;
+    st.gmMsgs = msgs; st.savedAt = null; gmSave(L, st);
   } catch (e) { st.error = String(e.message || e); }
   st.busy = false;
   gmPaint();
@@ -362,7 +402,7 @@ function mdLite(s) {
   }
   return html + (inList ? '</ul>' : '');
 }
-const TOOL_SHORT = { get_league_overview: 'standings', scan_league_needs: 'league needs', get_team_roster: 'roster', get_team_strategy: 'strategy', find_players: 'player search', suggest_trades: 'trade engine', evaluate_trade: 'trade check', shop_players: 'shop players', get_player_history: 'history', get_lineup_alerts: 'lineup', get_matchups: 'matchups' };
+const TOOL_SHORT = { get_league_overview: 'standings', scan_league_needs: 'league needs', get_team_roster: 'roster', get_team_strategy: 'strategy', find_players: 'player search', suggest_trades: 'trade engine', evaluate_trade: 'trade check', shop_players: 'shop players', get_draft_order: 'draft order', get_player_news: 'news', get_player_history: 'history', get_lineup_alerts: 'lineup', get_matchups: 'matchups' };
 function traceHtml(st) {
   if (!st.trace.length && !st.busy) return '';
   const items = st.trace.map(s => s.kind === 'think'
@@ -385,7 +425,7 @@ function planHtml(L, st) {
   }).join('');
   const list = (title, arr, fmt) => arr && arr.length ? `<div class="gmsec"><h3>${title}</h3><ul>${arr.map(x => `<li>${fmt(x)}</li>`).join('')}</ul></div>` : '';
   return `<div class="gmplan">
-    <div class="gmhead"><span class="badge dynasty">${esc(p.goal || '')}</span><div class="gmverdict">${esc(p.verdict || '')}</div><p class="sub">${esc(p.reasoning || '')}</p></div>
+    <div class="gmhead"><span class="badge dynasty">${esc(p.goal || '')}</span>${st.savedAt ? `<span class="sub" style="margin-left:8px">Saved plan from ${esc(new Date(st.savedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))} · trades re-checked against today’s rosters</span>` : ''}<div class="gmverdict">${esc(p.verdict || '')}</div><p class="sub">${esc(p.reasoning || '')}</p></div>
     ${trades ? `<div class="gmsec"><h3>Trades</h3>${trades}</div>` : ''}
     ${list('Waiver moves', p.waiver_adds, w => `<b>Add ${esc(w.add)}</b>${w.drop ? ` · drop ${esc(w.drop)}` : ''} — ${esc(w.why || '')}`)}
     ${list('Lineup fixes', p.lineup_fixes, x => esc(x))}
@@ -419,6 +459,7 @@ function vGm(L) {
   return `${leagueMeta(L)}
     <div class="card gmcard">
       <div class="askhead"><h2>GM Agent</h2><span class="sub">An autonomous Claude agent that plans with the app’s own tools and verifies every trade it proposes.</span></div>
+      <div id="gmStale" class="alert warn" style="${S.gmStale ? '' : 'display:none'}"><span class="sev">Update</span><div><div class="at">A newer version of the agent is live</div><div class="sub">Refresh the page to get every tool. <button class="linkbtn" onclick="location.reload()">Refresh now</button></div></div></div>
       ${off ? `<div class="alert warn"><span class="sev">Setup</span><div><div class="at">The agent isn’t switched on yet</div><div class="sub">The site owner needs to add a Claude API key on the server.</div></div></div>` : ''}
       <div class="sub" style="margin:6px 0">${L.kind === 'redraft' ? 'Redraft league: only this season counts, so rebuilding isn’t an option.' : `${KIND_LABEL[L.kind]} league: future picks and young players count.`} Pick a goal:</div>
       <div class="goalgrid">${goals.map(g => `<button class="goal ${st.goal === g.key ? 'on' : ''}" data-goal="${g.key}" ${st.busy ? 'disabled' : ''}><b>${esc(g.label)}</b><span>${esc(g.sub)}</span></button>`).join('')}</div>
