@@ -2,7 +2,8 @@
 
 A live analytics dashboard for Sleeper fantasy football and basketball leagues. Type any Sleeper username and it loads that person's leagues, rosters, matchups, alerts and trade ideas. No account or login needed.
 
-**Live site:** https://sleeper-dashboard-nine.vercel.app
+**Live demo (no login needed):** https://sleeper-dashboard-nine.vercel.app/?demo=1
+The demo loads a real dynasty league with every team and manager name hidden. To see your own leagues, open https://sleeper-dashboard-nine.vercel.app and enter your Sleeper username.
 
 ## What this project shows
 
