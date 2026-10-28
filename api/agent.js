@@ -9,6 +9,8 @@
 // Neutral message format sent by the browser:
 //   { role: 'user', text } | { role: 'assistant', text?, calls?: [{ id, name, args }] } | { role: 'tool', id, name, result }
 
+const VERSION = '2026-10-28.4'; // must match AGENT_VERSION in agent.js
+
 const TOOLS = [
   { name: 'get_league_overview', description: 'League type (dynasty / keeper / redraft), scoring, settings, the standings (rank, record, points, max points, contend-or-rebuild verdict, roster value rank) and which team is the user\'s.', params: {} },
   { name: 'scan_league_needs', description: 'For every team: contend/rebuild mode, roster value rank, and its weakest and strongest starting positions versus the league median. Use it to find trade partners whose needs match what the user can offer.', params: {} },
@@ -19,6 +21,8 @@ const TOOLS = [
   { name: 'shop_players', description: 'Shop specific players/picks the user wants to move: searches every team (or one) for packages they would likely accept in exchange for exactly these items, ranked by value and lineup impact. Use whenever the user names players they want to trade away. To compare alternatives (e.g. A+B+C vs A+B+D), call it once per combination.', params: { give: { type: 'array', items: { type: 'string' }, description: 'Players or picks the user gives, all included' }, with_team: { type: 'string', description: 'Only this partner (optional)' }, limit: { type: 'integer', description: 'Default 5, max 8' } }, required: ['give'] },
   { name: 'evaluate_trade', description: 'Grade a specific trade: value of each side (with a consolidation premium), lineup impact for both teams, and whether the other side would likely accept. Picks look like "2027 1st". Use it to check or tweak any trade before recommending it.', params: { give: { type: 'array', items: { type: 'string' } }, get: { type: 'array', items: { type: 'string' } }, other_team: { type: 'string' }, from_team: { type: 'string', description: 'Defaults to the user' } }, required: ['give', 'get', 'other_team'] },
   { name: 'get_player_history', description: 'How a player reached his current team: drafts, trades, waiver claims and drops across up to four seasons.', params: { player: { type: 'string' } }, required: ['player'] },
+  { name: 'get_draft_order', description: 'Projected order of next year\'s draft if the season ended today, and who owns each first-round pick. Dynasty and keeper leagues only.', params: {} },
+  { name: 'get_player_news', description: 'Recent ESPN headlines and current injury/practice status, for one player or (if none given) for the user\'s whole roster.', params: { player: { type: 'string', description: 'Player name (optional)' } } },
   { name: 'get_lineup_alerts', description: 'Problems in the user\'s lineup this week: injured/doubtful/bye starters, empty slots, better bench options, IR moves, hot free agents.', params: {} },
   { name: 'get_matchups', description: 'This week\'s matchups with current scores, projected finals and players left.', params: {} }
 ];
@@ -51,7 +55,9 @@ Ground rules:
   * DYNASTY: the whole roster carries over; future picks are tradeable. Contend, retool or rebuild are all valid.
   * KEEPER: only a few players carry over; weigh this season more than in dynasty and value keeper-eligible youth.
 - Team and manager names may be anonymised in demo mode; use them exactly as tools return them.
-- Only discuss this league and fantasy sports.`;
+- Only discuss this league and fantasy sports.
+- Never mention tool or function names to the user, and never describe your internal process ("I ran X"). Just give the answer in plain fantasy terms.
+- If a tool returns an error, try another way to get the answer (a different tool, a corrected name) before telling the user you can't.`;
 
 const GM_PROMPT = `${BASE_RULES}
 
@@ -115,16 +121,19 @@ function toAnthropic(msgs) {
   return messages;
 }
 
-async function callClaude(mode, system, msgs) {
-  const defs = (mode === 'gm' ? [...TOOLS, SUBMIT] : TOOLS).map(t => ({ name: t.name, description: t.description, input_schema: { type: 'object', properties: t.params, required: t.required || [] } }));
+async function callClaude(mode, system, msgs, allowed) {
+  const defs = (mode === 'gm' ? [...TOOLS, SUBMIT] : TOOLS).filter(t => t === SUBMIT || !allowed || allowed.has(t.name)).map(t => ({ name: t.name, description: t.description, input_schema: { type: 'object', properties: t.params, required: t.required || [] } }));
   defs[defs.length - 1].cache_control = { type: 'ephemeral' }; // cache the long, stable tool + system prefix across loop turns
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' },
-    body: JSON.stringify({ model: model(), max_tokens: mode === 'gm' ? 2500 : 900, system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }], tools: defs, messages: toAnthropic(msgs) })
-  });
-  const j = await r.json();
-  if (!r.ok) throw new Error((j.error && j.error.message) || `Claude API error ${r.status}`);
+  const payload = JSON.stringify({ model: model(), max_tokens: mode === 'gm' ? 3000 : 1200, system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }], tools: defs, messages: toAnthropic(msgs) });
+  let r, j;
+  for (let attempt = 0; attempt < 3; attempt++) { // retry rate limits and overloads with backoff
+    r = await fetch('https://api.anthropic.com/v1/messages', { method: 'POST', headers: { 'content-type': 'application/json', 'x-api-key': process.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }, body: payload });
+    j = await r.json().catch(() => ({}));
+    if (r.ok || ![429, 500, 502, 503, 529].includes(r.status)) break;
+    await new Promise(res => setTimeout(res, 1200 * (attempt + 1)));
+  }
+  if (!r.ok) throw new Error(r.status === 529 || r.status === 503 ? 'Claude is overloaded right now. Try again in a minute.' : (j.error && j.error.message) || `Claude API error ${r.status}`);
+  if (j.stop_reason === 'max_tokens' && !(j.content || []).some(b => b.type === 'tool_use')) j.content = [...(j.content || []), { type: 'text', text: '\n\n(Answer cut short. Ask me to continue.)' }];
   return {
     text: (j.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim(),
     calls: (j.content || []).filter(b => b.type === 'tool_use').map(b => ({ id: b.id, name: b.name, args: b.input || {} })),
@@ -157,7 +166,7 @@ function callMock(mode, msgs) {
 }
 
 module.exports = async (req, res) => {
-  if (req.method === 'GET') return res.status(200).json({ enabled: enabled(), model: process.env.AGENT_MOCK === '1' && !process.env.ANTHROPIC_API_KEY ? 'mock' : model(), tools: [...TOOLS, SUBMIT].map(t => t.name) });
+  if (req.method === 'GET') return res.status(200).json({ version: VERSION, enabled: enabled(), model: process.env.AGENT_MOCK === '1' && !process.env.ANTHROPIC_API_KEY ? 'mock' : model(), tools: [...TOOLS, SUBMIT].map(t => t.name) });
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
   if (!enabled()) return res.status(503).json({ error: 'The GM agent is not configured yet (no Claude API key on the server).' });
   const ip = String(req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || '?').split(',')[0].trim();
@@ -168,8 +177,11 @@ module.exports = async (req, res) => {
     const msgs = sanitize(body.messages);
     const ctx = body.context && typeof body.context === 'object' ? body.context : {};
     const system = `${mode === 'gm' ? GM_PROMPT : CHAT_PROMPT}\n\nLoaded league: ${clip(ctx.league, 120)} (${clip(ctx.sport, 10)}, ${clip(ctx.kind, 20)}), week ${clip(ctx.week, 4)}.${ctx.demo ? ' This is the public demo with anonymised names.' : ''}`;
-    const out = process.env.ANTHROPIC_API_KEY ? await callClaude(mode, system, msgs) : callMock(mode, msgs);
-    const known = new Set([...TOOLS, SUBMIT].map(t => t.name));
+    // only offer tools this copy of the browser app actually implements (an open tab may predate a deploy)
+    const allowed = Array.isArray(body.tools) && body.tools.length ? new Set(body.tools.map(String)) : null;
+    const out = process.env.ANTHROPIC_API_KEY ? await callClaude(mode, system, msgs, allowed) : callMock(mode, msgs);
+    out.version = VERSION;
+    const known = new Set([...TOOLS, SUBMIT].filter(t => t === SUBMIT || !allowed || allowed.has(t.name)).map(t => t.name));
     out.calls = (out.calls || []).filter(c => known.has(c.name) && (mode === 'gm' || c.name !== 'submit_gm_plan')).slice(0, 8);
     res.setHeader('Cache-Control', 'no-store');
     return res.status(200).json(out);
