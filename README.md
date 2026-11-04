@@ -22,7 +22,7 @@ The demo loads a real dynasty league with every team and manager name hidden. To
 | Tab | What it does |
 |---|---|
 | GM Agent | Autonomous Claude agent: goal → multi-step plan with verified trades, waiver moves and lineup fixes, plus follow-up chat |
-| Start/Sit | Lineup board with adjusted projections and reasons, game-environment cards (weather, lines, defensive injuries) and a 32-team defense-vs-position heatmap in the league's scoring |
+| Start/Sit | Lineup board with adjusted projections and reasons, a field view of the expected 22 (ESPN formation depth charts, your players and injuries marked), game-environment cards (weather, lines, defensive injuries) and a 32-team defense-vs-position heatmap in the league's scoring |
 | Overview | Standings, projected draft order and league summary |
 | Alerts | Injured or bye-week starters, empty lineup spots, injury news |
 | My Team / Teams | Rosters with points in the league's scoring |
@@ -44,6 +44,7 @@ Browser (index.html + app.js and feature modules)
         ├─ players.js  -> slimmed Sleeper player database
         ├─ defense.js  -> per-week stat lines allowed by each defense to each position (scored client-side)
         ├─ games.js    -> kickoff, indoor/outdoor, DraftKings line via ESPN + Open-Meteo forecast at kickoff
+        ├─ depth.js    -> ESPN formation depth charts for all 32 teams (expected offense incl. O-line, base defense)
         ├─ values.js   -> FantasyCalc trade values for players and picks
         └─ news.js     -> ESPN headlines
 ```

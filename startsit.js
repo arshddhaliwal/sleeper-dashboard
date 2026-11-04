@@ -17,11 +17,12 @@ async function ensureStartSit(L) {
   if (S.ss && S.ss.key === key && S.ss.model) return S.ss.model;
   if (S.ss && S.ss.key === key && S.ss.promise) return S.ss.promise;
   const promise = (async () => {
-    const [def, games] = await Promise.all([
+    const [def, games, depth] = await Promise.all([
       jc(`/api/defense?season=${L.league.season}&week=${L.curWeek}`, { weeks: [], data: {} }),
-      jc(`/api/games?season=${L.league.season}&week=${L.curWeek}`, { games: [] })
+      jc(`/api/games?season=${L.league.season}&week=${L.curWeek}`, { games: [] }),
+      jc('/api/depth', { teams: {} })
     ]);
-    const model = buildStartSit(L, def, games);
+    const model = buildStartSit(L, def, games, depth);
     S.ss = { key, model };
     return model;
   })();
@@ -189,8 +190,22 @@ function bestLineup(L, rows) {
   return { lineup, used, total: lineup.reduce((a, x) => a + (x.r ? x.r.adj : 0), 0) };
 }
 
-function buildStartSit(L, def, games) {
-  const M = { def: defenseModel(L, def), env: gameEnv(games), defInj: defenseInjuries(L) };
+/* ---------- depth charts: team -> slot -> players in order ---------- */
+function depthCharts(L) {
+  const out = {};
+  for (const id of L.pids) {
+    const p = L.player(id);
+    if (!p.team || !p.depthPos || !p.depth) continue;
+    ((out[p.team] = out[p.team] || {})[p.depthPos] = out[p.team][p.depthPos] || []).push(p);
+  }
+  for (const t of Object.values(out)) for (const arr of Object.values(t)) arr.sort((a, b) => a.depth - b.depth);
+  return out;
+}
+
+function buildStartSit(L, def, games, depth) {
+  const M = { def: defenseModel(L, def), env: gameEnv(games), defInj: defenseInjuries(L), depth: depthCharts(L), espnDepth: (depth && depth.teams) || {} };
+  M.byEspn = {}; M.byName = {}; // ESPN athlete id first; fall back to name + team (some Sleeper records have no espn_id)
+  for (const id of L.pids) { const p = L.player(id); if (p.espn) M.byEspn[p.espn] = id; if (p.team && p.pos !== 'DEF') M.byName[norm(p.name) + '|' + p.team] = id; }
   M.rows = {}; const row = id => M.rows[id] || (M.rows[id] = adjustPlayer(L, M, L.player(id)));
   M.row = row;
   if (L.me) {
@@ -251,9 +266,9 @@ function vStartSit(L) {
   const M = S.ss && S.ss.key === `${L.league.league_id}|${L.league.season}|${L.curWeek}` && S.ss.model;
   if (!M) { ensureStartSit(L).then(() => S.tab === 'startsit' && render()).catch(e => setMain(`<div class="err">${esc(e.message)}</div>`)); return `${leagueMeta(L)}<div class="loading">Grading defenses, pulling kickoff forecasts and betting lines…</div>`; }
   const view = S.ui.ssview || 'lineup';
-  const seg = `<div class="controls"><div class="seg">${[['lineup', 'My lineup'], ['games', 'Game environment'], ['defense', 'Defense grades']].map(([k, l]) => `<button data-ssview="${k}" class="${view === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+  const seg = `<div class="controls"><div class="seg">${[['lineup', 'My lineup'], ['field', 'Field'], ['games', 'Game environment'], ['defense', 'Defense grades']].map(([k, l]) => `<button data-ssview="${k}" class="${view === k ? 'on' : ''}">${l}</button>`).join('')}</div>
     <span class="sub">Week ${L.curWeek} · grades use ${M.def.weeks.length} week${M.def.weeks.length === 1 ? '' : 's'} of games in this league's scoring</span></div>`;
-  const body = view === 'games' ? ssGames(L, M) : view === 'defense' ? ssDefense(L, M) : ssLineup(L, M);
+  const body = view === 'games' ? ssGames(L, M) : view === 'defense' ? ssDefense(L, M) : view === 'field' ? ssField(L, M) : ssLineup(L, M);
   return `${leagueMeta(L)}${seg}${body}`;
 }
 
@@ -333,6 +348,113 @@ function hmDetail(L, M, key) {
     <svg width="${width}" height="${H}" viewBox="0 0 ${width} ${H}" role="img" aria-label="Weekly points allowed by ${esc(t)} to ${esc(pos)}">${bars}<line x1="0" x2="${width}" y1="${ly.toFixed(1)}" y2="${ly.toFixed(1)}" stroke="var(--dim)" stroke-dasharray="3 3"/></svg></div>`;
 }
 
+/* ---------- Field: the 22 on the field, as dots ---------- */
+const FIELD_W = 600, FIELD_H = 560, LOS = 300;
+// offense formation (11 personnel) — x from the offense's left to right, y below the line of scrimmage
+const OFF_SLOTS = [['LWR', 60, 300], ['SWR', 135, 318], ['TE', 400, 302], ['RWR', 540, 300], ['QB', 300, 352], ['RB', 300, 404]];
+const OL_X = [236, 268, 300, 332, 364];
+const DL_ORDER = ['LDE', 'LDT', 'NT', 'DT', 'RDT', 'RDE', 'DL'], LB_ORDER = ['LOLB', 'SLB', 'LILB', 'MLB', 'LB', 'RILB', 'WLB', 'ROLB', 'OLB'];
+const DB_SLOTS = { LCB: [60, 214], RCB: [540, 214], NB: [140, 188], FS: [230, 92], SS: [380, 112], DB: [300, 70], WS: [300, 70] };
+function spread(n, x0, x1) { return Array.from({ length: n }, (_, i) => n === 1 ? (x0 + x1) / 2 : x0 + (x1 - x0) * i / (n - 1)); }
+
+const ESPN_OUT = /out|reserve|unable|suspen|non.?football|ir\b/i, ESPN_Q = /questionable|doubtful|day.?to.?day/i;
+// ESPN formation slots -> field coordinates (offense below the line, defense above)
+const OFF_XY = { wr1: [60, 300], wr2: [540, 300], wr3: [135, 318], lt: [236, 300], lg: [268, 300], c: [300, 300], rg: [332, 300], rt: [364, 300], te: [400, 302], te1: [400, 302], te2: [200, 302], qb: [300, 352], rb: [300, 428], rb1: [300, 428] };
+const DL_KEYS = ['lde', 'ldt', 'nt', 'dt', 'rdt', 'rde'], LB_KEYS = ['wlb', 'lolb', 'lilb', 'mlb', 'rilb', 'rolb', 'slb'];
+const DB_XY = { lcb: [60, 214], rcb: [540, 214], nb: [125, 172], fs: [230, 92], ss: [380, 112] };
+const SLOT_LABEL = { wr1: 'WR', wr2: 'WR', wr3: 'WR', lt: 'LT', lg: 'LG', c: 'C', rg: 'RG', rt: 'RT', te: 'TE', te1: 'TE', te2: 'TE', qb: 'QB', rb: 'RB', rb1: 'RB', lde: 'DE', rde: 'DE', ldt: 'DT', rdt: 'DT', nt: 'NT', dt: 'DT', wlb: 'LB', slb: 'LB', mlb: 'LB', lilb: 'LB', rilb: 'LB', lolb: 'LB', rolb: 'LB', lcb: 'CB', rcb: 'CB', nb: 'NB', fs: 'FS', ss: 'SS' };
+
+function fieldSide(L, M, team, side) {
+  const chart = M.espnDepth[team] && M.espnDepth[team][side];
+  if (!chart || !chart.slots) return fieldSideSleeper(L, M, team, side);
+  const mine = new Set(L.me ? L.me.players : []), starters = new Set(L.me ? L.me.starters : []);
+  const dots = []; const slots = chart.slots;
+  const add = (key, x, y) => {
+    const arr = slots[key] || []; if (!arr.length) return;
+    const i = arr.findIndex(a => !ESPN_OUT.test(a.inj)); const a = i >= 0 ? arr[i] : arr[0];
+    const id = M.byEspn[a.espn] || M.byName[norm(a.name) + '|' + team]; const p = id ? L.player(id) : { id: 'espn' + a.espn, name: a.name, inj: '', body: '', pos: SLOT_LABEL[key] || key.toUpperCase() };
+    const out = i < 0 || ESPN_OUT.test(a.inj), q = ESPN_Q.test(a.inj) || (!!p.inj && !OUT.has(p.inj));
+    dots.push({ slot: SLOT_LABEL[key] || key.toUpperCase(), key, x, y, p, injLabel: out ? 'OUT' : q ? (/doubtful/i.test(a.inj) || p.inj === 'Doubtful' ? 'D' : 'Q') : '', injText: a.inj || p.inj || '',
+      sub: i > 0, for: i > 0 ? arr[0] : null, mine: !!id && mine.has(id), starter: !!id && starters.has(id), row: id && (M.rows[id] || (mine.has(id) ? M.row(id) : null)) || null, linked: !!id });
+  };
+  if (side === 'off') { for (const [k, xy] of Object.entries(OFF_XY)) if (slots[k]) add(k, xy[0], xy[1]); }
+  else {
+    const dl = DL_KEYS.filter(k => slots[k]); spread(dl.length, 185, 415).forEach((x, i) => add(dl[i], x, 262));
+    const lb = LB_KEYS.filter(k => slots[k]); spread(lb.length, 205, 395).forEach((x, i) => add(lb[i], x, 196));
+    for (const [k, xy] of Object.entries(DB_XY)) if (slots[k]) add(k, xy[0], xy[1]);
+  }
+  dots.formation = chart.name;
+  return dots;
+}
+function fieldSideSleeper(L, M, team, side) { // fallback when ESPN has nothing for the team: Sleeper's depth chart (no O-line order)
+  const chart = M.depth[team] || {};
+  const mine = new Set(L.me ? L.me.players : []), starters = new Set(L.me ? L.me.starters : []);
+  const pick = slot => { const arr = chart[slot] || []; if (!arr.length) return null; const first = arr[0]; if (first.out) { const sub = arr.find(x => !x.out); return sub ? { p: sub, sub: true, for: first } : { p: first }; } return { p: first }; };
+  const dots = [];
+  const add = (slot, x, y, d) => { if (!d) return; const p = d.p; dots.push({ slot: slot.replace(/^[LRS](WR|DE|DT|OLB|ILB|CB)$/, '$1'), key: slot, x, y, p, injLabel: p.inj ? (OUT.has(p.inj) ? 'OUT' : p.inj === 'Doubtful' ? 'D' : 'Q') : '', injText: p.inj || '', sub: !!d.sub, for: d.for ? { name: d.for.name, inj: d.for.inj } : null, mine: mine.has(p.id), starter: starters.has(p.id), row: M.rows[p.id] || (mine.has(p.id) ? M.row(p.id) : null), linked: true }); };
+  if (side === 'off') { OFF_SLOTS.forEach(([slot, x, y]) => add(slot, x, y, pick(slot))); OL_X.forEach(x => dots.push({ slot: 'OL', x, y: 300, p: null })); }
+  else {
+    const dl = DL_ORDER.filter(sl => chart[sl]); spread(dl.length, 185, 415).forEach((x, i) => add(dl[i], x, 262, pick(dl[i])));
+    const lb = LB_ORDER.filter(sl => chart[sl]); spread(lb.length, 150, 450).forEach((x, i) => add(lb[i], x, 196, pick(lb[i])));
+    for (const [sl, [x, y]] of Object.entries(DB_SLOTS)) if (chart[sl]) add(sl, x, y, pick(sl));
+  }
+  dots.formation = 'Sleeper depth chart';
+  return dots;
+}
+function dotHtml(L, d, flip) {
+  const y = d.y, x = d.x; // flip only moves the labels (defense reads upward, offense downward)
+  if (!d.p) return `<g class="fd ol" transform="translate(${x},${y})"><circle r="11"/><text class="fl" y="4" text-anchor="middle">OL</text></g>`;
+  const p = d.p; const inj = d.injLabel;
+  const cls = ['fd', d.mine ? (d.starter ? 'mine-st' : 'mine') : '', inj === 'OUT' ? 'out' : inj ? 'q' : '', d.sub ? 'sub' : ''].filter(Boolean).join(' ');
+  const last = p.name.split(' ').slice(1).join(' ') || p.name;
+  const stagger = /^(lg|rg|ldt|rdt|nb)$/.test(d.key || '') ? 12 : 0; // interior linemen sit 32px apart: alternate label rows
+  const title = `${p.name} · ${d.slot}${d.sub ? ` (in for ${d.for.name}, ${d.for.inj})` : ''}${d.injText ? ` · ${d.injText}${p.body ? ' ' + p.body : ''}` : ''}${d.row ? ` · ${f1(d.row.adj)} adj proj` : ''}`;
+  return `<g class="${cls}" transform="translate(${x},${y})" ${d.linked ? `data-hist="${esc(p.id)}"` : ''}><title>${esc(title)}</title>
+    <circle r="15"/><text class="fs" y="4" text-anchor="middle">${esc(d.slot)}</text>
+    ${inj ? `<g transform="translate(11,-11)"><rect x="-9" y="-6" width="18" height="12" rx="3" class="tagbg"/><text class="ft" y="3" text-anchor="middle">${inj}</text></g>` : ''}
+    <text class="fl" y="${flip ? -22 - stagger : 30 + stagger}" text-anchor="middle">${esc(last)}</text>
+    ${d.row && d.mine ? `<text class="fp" y="${flip ? -34 - stagger : 42 + stagger}" text-anchor="middle">${f1(d.row.adj)}</text>` : ''}
+    ${d.sub ? `<text class="fsub" y="${flip ? -34 - stagger : 42 + stagger}" text-anchor="middle">in for ${esc(d.for.name.split(' ').pop())}</text>` : ''}</g>`;
+}
+function ssField(L, M) {
+  const games = [...M.env.games].sort((a, b) => new Date(a.kickoff) - new Date(b.kickoff));
+  if (!games.length) return '<div class="card">No game data for this week yet.</div>';
+  const myTeams = (L.me ? L.me.starters : []).map(L.player).filter(p => p.team && ['QB', 'RB', 'WR', 'TE'].includes(p.pos)).map(p => p.team);
+  const count = t => myTeams.filter(x => x === t).length;
+  let g = games.find(x => x.id === S.ui.ssgame) || games.slice().sort((a, b) => (count(b.home) + count(b.away)) - (count(a.home) + count(a.away)))[0];
+  const flipKey = g.id; const defaultOff = count(g.home) >= count(g.away) ? g.home : g.away;
+  const off = S.ui.ssflip === flipKey ? (defaultOff === g.home ? g.away : g.home) : defaultOff;
+  const def = off === g.home ? g.away : g.home;
+  const offDots = fieldSide(L, M, off, 'off'), defDots = fieldSide(L, M, def, 'def');
+  const yard = i => `<line x1="0" x2="${FIELD_W}" y1="${i}" y2="${i}" class="yl"/>`;
+  const lines = []; for (let y = 60; y < FIELD_H; y += 60) if (y !== LOS) lines.push(yard(y));
+  const hashes = []; for (let y = 30; y < FIELD_H; y += 30) hashes.push(`<line x1="230" x2="240" y1="${y}" y2="${y}" class="hl"/><line x1="360" x2="370" y1="${y}" y2="${y}" class="hl"/>`);
+  const grades = SS_POS.filter(p => p !== 'K').map(pos => { const d = M.def.D[def] && M.def.D[def][pos]; return d && d.avg != null ? `<span class="chip"><i class="gr g${d.grade} sm">${d.grade}</i> vs ${pos} <span class="sub">${f1(d.avg)}/g</span></span>` : ''; }).join('');
+  const env = M.env.byTeam[g.home];
+  const wxLine = g.indoor ? '🏟 Indoors' : g.wx ? `${g.wx.temp != null ? g.wx.temp + '° ' : ''}${g.wx.label || ''}${g.wx.wind != null ? ` · 💨 ${g.wx.wind}${g.wx.gust > g.wx.wind ? '–' + g.wx.gust : ''} mph` : ''}${g.wx.rainPct ? ` · 🌧 ${g.wx.rainPct}%` : ''}` : '';
+  const injOut = defDots.filter(d => d.sub).map(d => `${d.for.name} (${d.slot}, ${d.for.inj}) → ${d.p.name}`);
+  const injQ = defDots.filter(d => d.p && d.injLabel && d.injLabel !== 'OUT').map(d => `${d.p.name} (${d.slot}, ${d.injText})`);
+  const offOut = offDots.filter(d => d.sub).map(d => `${d.for.name} (${d.slot}, ${d.for.inj}) → ${d.p.name}`);
+  const offQ = offDots.filter(d => d.p && d.injLabel && d.injLabel !== 'OUT').map(d => `${d.p.name} (${d.slot}, ${d.injText})`);
+  const svg = `<svg class="field" viewBox="0 0 ${FIELD_W} ${FIELD_H}" role="img" aria-label="${esc(off)} offense against ${esc(def)} defense">
+    <rect width="${FIELD_W}" height="${FIELD_H}" class="turf"/>${lines.join('')}${hashes.join('')}
+    <line x1="0" x2="${FIELD_W}" y1="${LOS}" y2="${LOS}" class="los"/>
+    <image href="https://sleepercdn.com/images/team_logos/nfl/${esc(def.toLowerCase())}.png" x="14" y="14" width="40" height="40" opacity=".9"/>
+    <text x="62" y="40" class="tm">${esc(def)} defense <tspan class="tmf">${esc(defDots.formation || '')}</tspan></text>
+    <image href="https://sleepercdn.com/images/team_logos/nfl/${esc(off.toLowerCase())}.png" x="14" y="${FIELD_H - 54}" width="40" height="40" opacity=".9"/>
+    <text x="62" y="${FIELD_H - 28}" class="tm">${esc(off)} offense <tspan class="tmf">${esc(offDots.formation || '')}</tspan></text>
+    ${defDots.map(d => dotHtml(L, d, true)).join('')}${offDots.map(d => dotHtml(L, d, false)).join('')}</svg>`;
+  return `<div class="controls"><label>Game</label><select id="ssGame">${games.map(x => `<option value="${esc(x.id)}" ${x.id === g.id ? 'selected' : ''}>${esc(x.away)} @ ${esc(x.home)} · ${esc(M.env.byTeam[x.home].when)}${count(x.home) + count(x.away) ? ` · ${count(x.home) + count(x.away)} of yours` : ''}</option>`).join('')}</select>
+      <button class="linkbtn" data-ssflip="${esc(flipKey)}">⇄ Show ${esc(def)} offense vs ${esc(off)} defense</button></div>
+    <div class="card"><div class="gtop"><h2 style="margin:0">${esc(off)} offense vs ${esc(def)} defense</h2><span class="sub">${esc(env.when)}${wxLine ? ' · ' + esc(wxLine) : ''}${g.odds ? ' · ' + esc(g.odds.details || '') + (g.odds.ou ? ' · O/U ' + g.odds.ou : '') : ''}</span></div>
+      <div class="need">${grades}</div>
+      ${svg}
+      <div class="legend"><span><i class="fd-key st"></i> your starter</span><span><i class="fd-key bn"></i> on your bench</span><span><i class="fd-key q"></i> Q / D</span><span><i class="fd-key out"></i> out — next man up shown</span><span>Number = adjusted projection</span></div>
+      ${injOut.length || injQ.length ? `<div class="hint" style="margin:10px 0 0"><b>${esc(def)} D</b> — ${injOut.length ? `out: ${esc(injOut.join(' · '))}. ` : ''}${injQ.length ? `questionable: ${esc(injQ.join(' · '))}.` : ''}</div>` : ''}
+      ${offOut.length || offQ.length ? `<div class="hint" style="margin:6px 0 0"><b>${esc(off)} O</b> — ${offOut.length ? `out: ${esc(offOut.join(' · '))}. ` : ''}${offQ.length ? `questionable: ${esc(offQ.join(' · '))}.` : ''}</div>` : ''}
+      <div class="hint" style="margin:8px 0 0">Expected lineups from ESPN's formation depth charts (offense in 11 personnel, defense in its base front plus the nickel back). When a listed starter is out, the next man on the chart is shown with a dashed ring.</div></div>`;
+}
+
 /* ---------------- agent tool ---------------- */
 async function startSitTool(L, args) {
   if (L.sport !== 'nfl') return { error: 'Start/Sit is NFL only' };
@@ -360,4 +482,6 @@ function bindStartSit() {
   document.querySelectorAll('[data-sspos]').forEach(b => b.onclick = () => { S.ui.sspos = b.dataset.sspos; render(); });
   document.querySelectorAll('[data-ssrecent]').forEach(b => b.onclick = () => { S.ui.ssrecent = b.dataset.ssrecent; render(); });
   document.querySelectorAll('[data-hm]').forEach(c => c.onclick = () => { S.ui.sshm = S.ui.sshm === c.dataset.hm ? null : c.dataset.hm; render(); });
+  const gs = $('#ssGame'); if (gs) gs.onchange = () => { S.ui.ssgame = gs.value; S.ui.ssflip = null; render(); };
+  document.querySelectorAll('[data-ssflip]').forEach(b => b.onclick = () => { S.ui.ssflip = S.ui.ssflip === b.dataset.ssflip ? null : b.dataset.ssflip; render(); });
 }

@@ -268,3 +268,32 @@ details summary{cursor:pointer;color:var(--mute);font-size:13px;margin-top:10px}
   .ssn{min-width:56px}
   .rng{display:none}
 }
+
+/* field view */
+.field{width:100%;max-width:720px;height:auto;display:block;margin:4px auto 0;border-radius:12px;font-family:var(--sans)}
+.field .turf{fill:#17321f}
+@media (prefers-color-scheme: light){:root:not([data-theme="dark"]) .field .turf{fill:#2f7a46}}
+.field .yl{stroke:rgba(255,255,255,.18);stroke-width:1}
+.field .hl{stroke:rgba(255,255,255,.22);stroke-width:1}
+.field .los{stroke:#ffd54a;stroke-width:2;stroke-dasharray:6 4;opacity:.8}
+.field .tm{fill:#fff;font-size:13px;font-weight:700;opacity:.85}
+.field .fd circle{fill:#2b3a44;stroke:#7d8c99;stroke-width:2}
+.field .fd.ol circle{fill:#223029;stroke:#4e6356}
+.field .fd.ol .fl{font-size:8px;fill:#9fb3a7}
+.field .fd .fs{font-size:8.5px;font-weight:800;fill:#e8ecf3;letter-spacing:.02em}
+.field .fd .fl{font-size:10.5px;font-weight:600;fill:#fff;paint-order:stroke;stroke:rgba(0,0,0,.55);stroke-width:3px}
+.field .fd .fp{font-size:10px;font-weight:800;fill:var(--accent);font-family:var(--mono);paint-order:stroke;stroke:rgba(0,0,0,.6);stroke-width:3px}
+.field .fd .fsub{font-size:9px;fill:#ffd54a;paint-order:stroke;stroke:rgba(0,0,0,.6);stroke-width:3px}
+.field .fd.mine circle{fill:#1f2d1a;stroke:var(--accent);stroke-width:2.5}
+.field .fd.mine-st circle{fill:#b6f36a;stroke:#e6ffb8;stroke-width:2.5}
+.field .fd.mine-st .fs{fill:#11160a}
+.field .fd.q circle{stroke:#ffc65c}
+.field .fd.out circle{stroke:#ff7a7a;stroke-dasharray:3 2}
+.field .fd.sub circle{stroke:#ffd54a;stroke-dasharray:3 2}
+.field .fd .tagbg{fill:#ff7a7a}
+.field .fd.q .tagbg{fill:#ffc65c}
+.field .fd .ft{font-size:8px;font-weight:800;fill:#1a1300}
+.field .fd[data-hist]{cursor:pointer}
+.fd-key{display:inline-block;width:12px;height:12px;border-radius:50%;background:#2b3a44;border:2px solid #7d8c99;vertical-align:middle}
+.fd-key.st{background:#b6f36a;border-color:#e6ffb8}.fd-key.bn{background:#1f2d1a;border-color:var(--accent)}.fd-key.q{border-color:#ffc65c}.fd-key.out{border-color:#ff7a7a;border-style:dashed}
+.field .tmf{font-weight:500;opacity:.7;font-size:11px}
