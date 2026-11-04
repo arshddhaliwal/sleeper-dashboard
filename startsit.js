@@ -234,6 +234,8 @@ function buildStartSit(L, def, games, depth) {
     M.curTotal = M.lineup.reduce((a, x) => a + (x.cur ? x.cur.adj : 0), 0);
     M.bestTotal = best.total;
     M.swaps = M.lineup.filter(x => x.change).map(x => ({ slot: x.slot, rec: x.rec, cur: x.out, gain: x.gain })).sort((a, b) => b.gain - a.gain);
+    M.bestUsed = best.used;
+    M.swapOut = {}; M.swaps.forEach(sw => { if (sw.cur) M.swapOut[sw.cur.p.id] = sw; }); // benched player -> who replaces him
     // close calls: top two options for a slot within 1.5 adjusted points
     M.coinflips = M.lineup.filter(x => x.rec && x.alts.length && x.alts.find(a => a.p.id !== x.rec.p.id && Math.abs(a.adj - x.rec.adj) <= 1.5 && a.adj > 3))
       .map(x => ({ slot: x.slot, a: x.rec, b: x.alts.find(a => a.p.id !== x.rec.p.id) }));
@@ -265,9 +267,10 @@ function vStartSit(L) {
   if (L.sport !== 'nfl') return `${leagueMeta(L)}<div class="card">Start/Sit is NFL only — it needs defenses, weather and betting lines.</div>`;
   const M = S.ss && S.ss.key === `${L.league.league_id}|${L.league.season}|${L.curWeek}` && S.ss.model;
   if (!M) { ensureStartSit(L).then(() => S.tab === 'startsit' && render()).catch(e => setMain(`<div class="err">${esc(e.message)}</div>`)); return `${leagueMeta(L)}<div class="loading">Grading defenses, pulling kickoff forecasts and betting lines…</div>`; }
-  const view = S.ui.ssview || 'lineup';
+  const view = S.ui.ssview || 'field';
   const seg = `<div class="controls"><div class="seg">${[['lineup', 'My lineup'], ['field', 'Field'], ['games', 'Game environment'], ['defense', 'Defense grades']].map(([k, l]) => `<button data-ssview="${k}" class="${view === k ? 'on' : ''}">${l}</button>`).join('')}</div>
     <span class="sub">Week ${L.curWeek} · grades use ${M.def.weeks.length} week${M.def.weeks.length === 1 ? '' : 's'} of games in this league's scoring</span></div>`;
+  if (!M.mine) return `${leagueMeta(L)}${seg}${view === 'games' ? ssGames(L, M) : view === 'defense' ? ssDefense(L, M) : view === 'field' ? ssField(L, M) : '<div class="card">You don\'t have a team in this league.</div>'}`;
   const body = view === 'games' ? ssGames(L, M) : view === 'defense' ? ssDefense(L, M) : view === 'field' ? ssField(L, M) : ssLineup(L, M);
   return `${leagueMeta(L)}${seg}${body}`;
 }
@@ -455,6 +458,80 @@ function ssField(L, M) {
       <div class="hint" style="margin:8px 0 0">Expected lineups from ESPN's formation depth charts (offense in 11 personnel, defense in its base front plus the nickel back). When a listed starter is out, the next man on the chart is shown with a dashed ring.</div></div>`;
 }
 
+/* ---------- This week: one verdict per slot ---------- */
+const ORDN = n => n + (n % 100 >= 11 && n % 100 <= 13 ? 'th' : ['th', 'st', 'nd', 'rd'][n % 10] || 'th');
+const POSPL = { QB: 'QBs', RB: 'RBs', WR: 'WRs', TE: 'TEs', K: 'kickers' };
+// One plain sentence for the factor that moved the number most
+function reasonSentence(r) {
+  if (!r) return '';
+  if (r.bye) return 'On bye this week.';
+  if (r.out) return `Listed ${r.p.inj}${r.p.body ? ` (${r.p.body})` : ''}.`;
+  const f = r.factors.filter(x => x.k !== 'home').sort((a, b) => Math.abs(b.mult - 1) - Math.abs(a.mult - 1))[0];
+  if (!f) return r.opp ? `${r.home ? 'vs' : '@'} ${r.opp} — nothing unusual: average matchup, no weather in play.` : 'No game found this week.';
+  const d = r.defRow, pos = POSPL[r.p.pos] || r.p.pos + 's';
+  switch (f.k) {
+    case 'matchup': return d.rank <= 16 ? `${r.opp} has been the ${ORDN(d.rank)}-easiest defense for ${pos} this season.` : `${r.opp} has been the ${ORDN(33 - d.rank)}-toughest defense for ${pos} this season.`;
+    case 'wind': return f.mult < 1 ? `${r.env.wx.wind} mph wind (gusts ${r.env.wx.gust}) at kickoff — passing game takes a hit.` : `${r.env.wx.wind} mph wind at kickoff — expect more carries.`;
+    case 'rain': return `Rain likely at kickoff (${r.env.wx.rainPct}%)${f.mult < 1 ? ' — slightly fewer passes.' : '.'}`;
+    case 'snow': return `Snow in the forecast — big drag on the passing game.`;
+    case 'cold': return `${r.env.wx.temp}°F at kickoff.`;
+    case 'vegas': { const o = r.env.odds; const mine = o.fav === r.p.team ? o.favTotal : o.fav ? o.dogTotal : o.ou / 2; return f.mult > 1 ? `Vegas expects ${f1(mine)} points from ${r.p.team} (O/U ${o.ou}) — a lot of scoring to go around.` : `Vegas expects only ${f1(mine)} points from ${r.p.team} (O/U ${o.ou}).`; }
+    case 'script': return f.mult > 1 ? `${r.p.team} is a big favorite — run-heavy game script.` : /favorite/.test(f.label) ? `${r.p.team} is a big favorite — could sit on the lead late.` : `${r.p.team} is a big underdog — fewer carries if they fall behind.`;
+    case 'inj': return `Listed ${r.p.inj}${r.p.body ? ` (${r.p.body})` : ''}${r.p.practice ? `, ${r.p.practice.toLowerCase()}` : ''}.`;
+    case 'definj': { const n = r.defInj.length; const grp = r.defInj[0].grp === 'secondary' ? 'secondary' : 'front seven'; return `${r.opp} is missing ${n} starter${n > 1 ? 's' : ''} in the ${grp} (${r.defInj.map(x => x.name.split(' ').pop()).join(', ')}).`; }
+    default: return f.label + '.';
+  }
+}
+// why the newcomer beats the benched man: his best positive factor, else the benched man's worst, else the raw numbers
+function swapReason(rec, cur) {
+  const best = r => r.factors.filter(f => f.k !== 'home').sort((a, b) => (b.mult - 1) - (a.mult - 1))[0];
+  const worst = r => r.factors.filter(f => f.k !== 'home').sort((a, b) => (a.mult - 1) - (b.mult - 1))[0];
+  const up = best(rec); if (up && up.mult > 1.02) return reasonSentence({ ...rec, factors: [up] });
+  const dn = cur && worst(cur); if (dn && dn.mult < 0.98) return reasonSentence({ ...cur, factors: [dn] });
+  return `Projects ${f1(rec.adj)} to ${cur ? f1(cur.adj) : '0'} this week.`;
+}
+function verdictFor(M, x) {
+  const flip = M.coinflips.find(c => c.slot === x.slot && x.cur && (c.a.p.id === x.cur.p.id || c.b.p.id === x.cur.p.id));
+  if (!x.cur) return { v: 'empty', t: 'Empty', why: x.rec ? `Slot is empty — put in ${x.rec.p.name}.` : 'Slot is empty and nobody on the bench fits.' };
+  if (x.cur.bye) return { v: 'bye', t: 'Bye', why: x.rec && x.rec.p.id !== x.cur.p.id ? `${x.cur.p.name} is on bye — start ${x.rec.p.name}.` : `${x.cur.p.name} is on bye and there's no replacement.` };
+  if (x.cur.out) return { v: 'out', t: 'Out', why: `${x.cur.p.name} is ${x.cur.p.inj}${x.rec && x.rec.p.id !== x.cur.p.id ? ` — start ${x.rec.p.name}.` : '.'}` };
+  const sw = M.swapOut[x.cur.p.id];
+  if (sw) return { v: 'sit', t: 'Sit', why: `Start ${sw.rec.p.name} instead (+${f1(sw.gain)}). ${swapReason(sw.rec, x.cur)}` };
+  if (flip) { const other = flip.a.p.id === x.cur.p.id ? flip.b : flip.a; const lean = flip.a; return { v: 'flip', t: 'Coin flip', why: `${lean.p.name} by a hair over ${other.p.name} (${f1(flip.a.adj)} vs ${f1(flip.b.adj)}). ${reasonSentence(lean)}` }; }
+  return { v: 'start', t: 'Start', why: reasonSentence(x.cur) };
+}
+function vWeek(L) {
+  if (!L.me) return `${leagueMeta(L)}<div class="card">You don't have a team in this league.</div>`;
+  const head = (sub) => `<div class="wkhead"><h1>Week ${L.curWeek}</h1><span class="sub">${sub}</span></div>`;
+  if (L.sport !== 'nfl') return `${leagueMeta(L)}${head('Start/sit calls are NFL only — here are your matchups.')}${vMatchups(L)}`;
+  const M = S.ss && S.ss.key === `${L.league.league_id}|${L.league.season}|${L.curWeek}` && S.ss.model;
+  if (!M) { ensureStartSit(L).then(() => S.tab === 'week' && render()).catch(e => setMain(`<div class="err">${esc(e.message)}</div>`)); return `${leagueMeta(L)}${head('')}<div class="loading">Checking matchups, weather, lines and injuries…</div>`; }
+  // my matchup this week
+  const mu = L.cur.find(m => m.roster_id === L.me.rid); const opp = mu && L.cur.find(m => m.matchup_id === mu.matchup_id && m.roster_id !== L.me.rid);
+  const oppT = opp && L.byRid[opp.roster_id];
+  const projOf = m => (m.points || 0) + (m.starters || []).filter(id => id && id !== '0' && !L.player(id).playedThisWk).reduce((a, id) => a + L.player(id).proj, 0);
+  const sub = oppT ? `vs <b>${esc(oppT.name)}</b> · proj ${f1(projOf(mu))} – ${f1(projOf(opp))}` : 'No matchup this week';
+  const open = S.ui.wkopen || null;
+  const rows = M.lineup.map(x => {
+    const v = verdictFor(M, x); const r = x.cur;
+    const slot = x.slot.replace('SUPER_FLEX', 'SFLX').replace('WRRB_FLEX', 'W/R').replace('REC_FLEX', 'W/T');
+    const key = x.slot + '|' + x.i;
+    const det = open === key ? `<div class="vdet"><div class="lbl">Full breakdown</div>${r ? playerLine(L, r, { showRange: true, maxv: Math.max(10, ...M.mine.map(z => z.ceil || 0)) }) : ''}${(() => { const alt = r && M.swapOut[r.p.id] ? M.swapOut[r.p.id].rec : (!r || r.bye || r.out) && x.rec ? x.rec : null; return alt ? `<div class="lbl">Start instead</div>${playerLine(L, alt, { showRange: true, maxv: Math.max(10, ...M.mine.map(z => z.ceil || 0)) })}` : ''; })()}${x.alts.filter(a => !x.rec || a.p.id !== x.rec.p.id).slice(0, 2).map(a => `<div class="lbl">Also eligible</div>${playerLine(L, a, { showRange: false })}`).join('')}</div>` : '';
+    return `<div class="vrow" data-wk="${esc(key)}"><span class="vd ${v.v}">${v.t}</span>
+      <div class="who">${r ? headshot(L, r.p) : '<span class="hs"></span>'}<div style="min-width:0"><div class="nm">${r ? esc(r.p.name) : '<span class="mute">Empty</span>'} <span class="pos ${POSCLS(slot)}">${esc(slot)}</span>${r && r.opp ? `<span class="sub"> ${r.home ? 'vs' : '@'} ${esc(r.opp)}${r.env && r.env.when ? ' · ' + esc(r.env.when) : ''}</span>` : ''}</div><div class="why">${esc(v.why)}</div></div></div>
+      <div class="pts">${r && r.adj > 0 ? `<b>${f1(r.adj)}</b>proj` : ''}</div>${det}</div>`;
+  }).join('');
+  const gain = M.bestTotal - M.curTotal;
+  const summary = M.swaps.length ? `<span class="good">${M.swaps.length} change${M.swaps.length > 1 ? 's' : ''} worth +${f1(gain)}</span>` : M.coinflips.length ? `Lineup's set — ${M.coinflips.length} coin flip${M.coinflips.length > 1 ? 's' : ''} to watch` : '<span class="good">Lineup\'s set. Nothing to do.</span>';
+  const wxWarn = [...new Set(M.mine.filter(r => L.me.starters.includes(r.p.id) && r.env && r.env.flags.some(f => f.sev >= 1 && f.k !== 'dome')).map(r => `${r.env.away} @ ${r.env.home}: ${r.env.flags.filter(f => f.k !== 'dome').map(f => f.t).join(', ')}`))];
+  return `${leagueMeta(L)}${head(sub)}
+    <div class="card"><div class="gtop" style="margin-bottom:4px"><h2 style="margin:0">Your lineup</h2><span class="sub">${summary}</span></div>
+      ${wxWarn.length ? `<div class="hint" style="margin:6px 0 8px">🌧 Weather to watch — ${esc(wxWarn.join(' · '))}</div>` : ''}
+      ${rows}
+      <div class="hint" style="margin:12px 0 0">Tap a row for the full breakdown. Proj = Sleeper's projection adjusted for the defense, weather, betting line and injuries.</div></div>
+    <div class="wkfoot"><button data-tab="startsit" data-ssview="field">See the field</button><button data-tab="startsit" data-ssview="games">Weather &amp; lines</button><button data-tab="startsit" data-ssview="defense">Defense grades</button><button data-tab="gm">Ask the GM agent</button></div>`;
+}
+
 /* ---------------- agent tool ---------------- */
 async function startSitTool(L, args) {
   if (L.sport !== 'nfl') return { error: 'Start/Sit is NFL only' };
@@ -478,6 +555,8 @@ async function startSitTool(L, args) {
 }
 
 function bindStartSit() {
+  document.querySelectorAll('[data-wk]').forEach(row => row.onclick = e => { if (e.target.closest('[data-hist]')) return; S.ui.wkopen = S.ui.wkopen === row.dataset.wk ? null : row.dataset.wk; render(); });
+  document.querySelectorAll('.wkfoot [data-tab]').forEach(b => b.onclick = () => { if (b.dataset.ssview) S.ui.ssview = b.dataset.ssview; S.tab = b.dataset.tab; history.replaceState(null, '', '#' + S.tab); render(); });
   document.querySelectorAll('[data-ssview]').forEach(b => b.onclick = () => { S.ui.ssview = b.dataset.ssview; render(); });
   document.querySelectorAll('[data-sspos]').forEach(b => b.onclick = () => { S.ui.sspos = b.dataset.sspos; render(); });
   document.querySelectorAll('[data-ssrecent]').forEach(b => b.onclick = () => { S.ui.ssrecent = b.dataset.ssrecent; render(); });

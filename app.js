@@ -44,13 +44,19 @@ function init() {
   S.demo = qs.get('demo') === '1';
   if (S.demo) document.body.classList.add('demo');
   const u = S.demo ? DEMO_USER : (qs.get('u') || store.get('sd_user', ''));
-  S.tab = (location.hash || '#overview').slice(1);
+  S.tab = (location.hash || '#week').slice(1);
   $('#userInput').value = S.demo ? '' : u;
   if (S.demo) { $('#userInput').placeholder = 'Demo mode — enter your own username'; }
   $('#tabs').addEventListener('click', e => {
     const b = e.target.closest('button[data-tab]'); if (!b) return;
-    S.tab = b.dataset.tab; history.replaceState(null, '', '#' + S.tab); render();
+    S.tab = b.dataset.tab; history.replaceState(null, '', '#' + S.tab); $('#more').classList.remove('open'); render();
   });
+  $('#moreBtn').addEventListener('click', e => {
+    e.stopPropagation(); const m = $('#more'); m.classList.toggle('open'); $('#moreBtn').setAttribute('aria-expanded', m.classList.contains('open'));
+    const r = $('#moreBtn').getBoundingClientRect(), menu = $('#moreMenu'); // fixed so the scrolling tab bar can't clip it
+    menu.style.top = (r.bottom + 4) + 'px'; menu.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 256)) + 'px';
+  });
+  document.addEventListener('click', e => { if (!e.target.closest('#more')) $('#more').classList.remove('open'); });
   $('#userForm').addEventListener('submit', async e => {
     e.preventDefault();
     const name = $('#userInput').value.trim();
@@ -66,7 +72,10 @@ function init() {
 }
 
 function markTab() {
-  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
+  document.querySelectorAll('#tabs button[data-tab]').forEach(b => b.classList.toggle('on', b.dataset.tab === S.tab));
+  const inMore = !!document.querySelector(`#moreMenu button[data-tab="${S.tab}"]`);
+  $('#moreBtn').classList.toggle('on', inMore);
+  $('#moreBtn').textContent = inMore ? (document.querySelector(`#moreMenu button[data-tab="${S.tab}"]`).textContent.trim().replace(/\s*\d+$/, '') + ' ▾') : 'More ▾';
   const badge = $('#alertBadge');
   if (badge) { const n = (S.allAlerts || []).filter(a => a.sev === 'crit').length; badge.textContent = n || ''; badge.style.display = n ? '' : 'none'; }
 }
@@ -284,7 +293,7 @@ function activePids(L, t) { return t.players.filter(p => !t.reserve.has(p) && !t
 function render() {
   markTab();
   if (!S.L) return;
-  const fn = { overview: vOverview, alerts: vAlerts, team: vTeam, matchups: vMatchups, teams: vTeams, trades: vTrades, check: vCheck, news: vNews, players: vPlayers, history: vHistory, strategy: vStrategy, gm: vGm, startsit: vStartSit }[S.tab] || vOverview;
+  const fn = { week: vWeek, overview: vOverview, alerts: vAlerts, team: vTeam, matchups: vMatchups, teams: vTeams, trades: vTrades, check: vCheck, news: vNews, players: vPlayers, history: vHistory, strategy: vStrategy, gm: vGm, startsit: vStartSit }[S.tab] || vWeek;
   setMain(fn(S.L));
   bind();
 }
