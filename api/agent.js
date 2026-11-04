@@ -9,7 +9,7 @@
 // Neutral message format sent by the browser:
 //   { role: 'user', text } | { role: 'assistant', text?, calls?: [{ id, name, args }] } | { role: 'tool', id, name, result }
 
-const VERSION = '2026-10-28.5'; // must match AGENT_VERSION in agent.js
+const VERSION = '2026-11-04.1'; // must match AGENT_VERSION in agent.js
 
 const TOOLS = [
   { name: 'get_league_overview', description: 'League type (dynasty / keeper / redraft), scoring, settings, the standings (rank, record, points, max points, contend-or-rebuild verdict, roster value rank) and which team is the user\'s.', params: {} },
@@ -25,7 +25,8 @@ const TOOLS = [
   { name: 'get_player_news', description: 'Recent ESPN headlines and current injury/practice status, for one player or (if none given) for the user\'s whole roster.', params: { player: { type: 'string', description: 'Player name (optional)' } } },
   { name: 'check_player_risks', description: 'Risk check for specific players: injury and practice status, depth-chart role (e.g. a backup whose production depends on an injured starter), latest player note with any return timeline, upcoming bye, age cliff, falling market value, and whether Sleeper users are dropping him.', params: { players: { type: 'array', items: { type: 'string' } }, side: { type: 'string', description: '"get" if the user would receive them (default), "give" if sending them' } }, required: ['players'] },
   { name: 'get_lineup_alerts', description: 'Problems in the user\'s lineup this week: injured/doubtful/bye starters, empty slots, better bench options, IR moves, hot free agents.', params: {} },
-  { name: 'get_matchups', description: 'This week\'s matchups with current scores, projected finals and players left.', params: {} }
+  { name: 'get_matchups', description: 'This week\'s matchups with current scores, projected finals and players left.', params: {} },
+  { name: 'analyze_start_sit', description: 'NFL start/sit model for this week. Adjusts every player\'s projection for the opposing defense\'s record against his position in THIS league\'s scoring (grade A = easiest, F = toughest), the kickoff forecast (wind, rain, snow, cold), the betting line (implied team total, game script), his injury tag and injured starters on the defense he faces. With no arguments: the user\'s full lineup, recommended swaps, coin flips, bench and weather warnings. With players: a side-by-side breakdown of just those players (use this for "should I start X or Y").', params: { players: { type: 'array', items: { type: 'string' }, description: 'Player names to compare (optional)' } } }
 ];
 
 const SUBMIT = {
@@ -68,13 +69,13 @@ You are the user's autonomous General Manager. Given a goal, work in steps witho
 2. Decide the strategy. If the goal is "let the agent decide", pick it from the evidence (standings, roster value rank, luck, core age, league type). In a redraft league you may only choose win-now or playoff push.
 3. Find partners: scan_league_needs, then suggest_trades (overall and/or with the best-fitting partners). Look at partner rosters when useful.
 4. Build 1-3 trades that serve the goal. Verify EVERY trade with evaluate_trade; if the other side is unlikely to accept or the value is lopsided, adjust and re-check. Don't recommend a trade you haven't verified.
-5. Check get_lineup_alerts and free agents (find_players with free_agents_only) for quick wins.
+5. Check get_lineup_alerts, analyze_start_sit (NFL: the lineup the model would start this week and why) and free agents (find_players with free_agents_only) for quick wins. Put the start/sit swaps in lineup_fixes with the reason (matchup grade, weather, line).
 6. Call submit_gm_plan once with the final plan. Use exact player and team names from the tools.
 Work efficiently: batch independent tool calls in the same turn. Aim to finish in about 8 turns.`;
 
 const CHAT_PROMPT = `${BASE_RULES}
 
-Answer the user's follow-up questions about the league and the GM plan (if one is in the conversation). Call tools whenever you need data. Be concise and concrete (under ~180 words unless asked for detail), name players, teams and numbers, and use short bullets where they help.`;
+Answer the user's follow-up questions about the league and the GM plan (if one is in the conversation). Call tools whenever you need data. For any "who should I start" / "X or Y" question in an NFL league, call analyze_start_sit with those players and explain the call using its factors (matchup grade, weather, implied total, injuries) and the floor/ceiling; say when it's a coin flip and suggest the late-swap pivot if the players kick off at different times. Be concise and concrete (under ~180 words unless asked for detail), name players, teams and numbers, and use short bullets where they help.`;
 
 // Best-effort per-instance rate limit (serverless instances don't share memory; it only blunts bursts).
 const hits = new Map();

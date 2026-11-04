@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sleeper Dashboard</title>
-<meta name="description" content="Live Sleeper fantasy dashboard: standings, rosters, matchups, draft order and trade finder.">
+<meta name="description" content="Live Sleeper fantasy dashboard: start/sit agent with defense grades and weather, standings, rosters, matchups, draft order and trade finder.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -24,6 +24,7 @@
 <nav class="tabs" id="tabs">
   <button data-tab="overview" class="on">Overview</button>
   <button data-tab="gm" class="asktab">✦ GM Agent</button>
+  <button data-tab="startsit">Start/Sit</button>
   <button data-tab="alerts">Alerts <span class="nb" id="alertBadge" style="display:none"></span></button>
   <button data-tab="team">My Team</button>
   <button data-tab="matchups">Matchups</button>
@@ -43,7 +44,7 @@
     <p class="sub">The demo uses a real dynasty league with every team and manager name hidden.</p>
   </section>
 </main>
-<footer class="foot"><span id="updated"></span> · Data: Sleeper (leagues, stats, projections, trends), FantasyCalc (NFL trade values), ESPN (headlines). GM Agent: Claude tool-calling agent over the app's own functions. Points use each league's own scoring.</footer>
+<footer class="foot"><span id="updated"></span> · Data: Sleeper (leagues, stats, projections, trends), FantasyCalc (NFL trade values), ESPN (headlines, lines), Open-Meteo (kickoff weather). GM Agent: Claude tool-calling agent over the app's own functions. Points use each league's own scoring.</footer>
 <script src="/app.js"></script>
 <script src="/alerts.js"></script>
 <script src="/news.js"></script>
@@ -51,6 +52,7 @@
 <script src="/history.js"></script>
 <script src="/strategy.js"></script>
 <script src="/risk.js"></script>
+<script src="/startsit.js"></script>
 <script src="/agent.js"></script>
 </body>
 </html>

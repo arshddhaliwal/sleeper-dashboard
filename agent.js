@@ -5,7 +5,7 @@
    runs here in the browser against the loaded league. */
 
 const GM_MAX_ROUNDS = 16, CHAT_MAX_ROUNDS = 8;
-const AGENT_VERSION = '2026-10-28.5'; // must match api/agent.js; a mismatch means this tab is running an old copy of the app
+const AGENT_VERSION = '2026-11-04.1'; // must match api/agent.js; a mismatch means this tab is running an old copy of the app
 
 const plain = s => { const d = document.createElement('div'); d.innerHTML = String(s == null ? '' : s).replace(/<[^>]+>/g, ' '); return d.textContent.replace(/\s+/g, ' ').trim(); };
 const r1 = n => n == null || isNaN(n) ? null : Math.round(n * 10) / 10;
@@ -226,7 +226,8 @@ const AGENT_TOOLS = {
     const by = {}; L.cur.forEach(m => { if (m.matchup_id) (by[m.matchup_id] = by[m.matchup_id] || []).push(m); });
     const side = m => { const st = (m.starters || []).filter(x => x && x !== '0'), left = st.filter(id => !L.player(id).playedThisWk); return { team: teamRef(L, L.byRid[m.roster_id]), points: r1(m.points || 0), projected_final: r1((m.points || 0) + left.reduce((s, id) => s + L.player(id).proj, 0)), players_left: left.length }; };
     return { week: L.curWeek, matchups: Object.values(by).filter(p => p.length === 2).map(([x, y]) => [side(x), side(y)]) };
-  }
+  },
+  analyze_start_sit(L, a) { return startSitTool(L, a || {}); }
 };
 
 // Plain-English trace line for each tool call
@@ -247,6 +248,7 @@ function traceLabel(L, c) {
     case 'get_player_news': return a.player ? `Read news on ${esc(a.player)}` : 'Read news on your roster';
     case 'get_lineup_alerts': return 'Checked your lineup for problems';
     case 'get_matchups': return 'Read this week’s matchups';
+    case 'analyze_start_sit': return a.players && a.players.length ? `Start/sit check: ${asArray(a.players).join(', ')}` : 'Ran the start/sit model on the lineup';
     case 'submit_gm_plan': return 'Wrote the plan';
   }
   return esc(c.name);
@@ -413,7 +415,7 @@ function mdLite(s) {
   }
   return html + (inList ? '</ul>' : '');
 }
-const TOOL_SHORT = { get_league_overview: 'standings', scan_league_needs: 'league needs', get_team_roster: 'roster', get_team_strategy: 'strategy', find_players: 'player search', suggest_trades: 'trade engine', evaluate_trade: 'trade check', shop_players: 'shop players', get_draft_order: 'draft order', get_player_news: 'news', check_player_risks: 'risk check', get_player_history: 'history', get_lineup_alerts: 'lineup', get_matchups: 'matchups' };
+const TOOL_SHORT = { get_league_overview: 'standings', scan_league_needs: 'league needs', get_team_roster: 'roster', get_team_strategy: 'strategy', find_players: 'player search', suggest_trades: 'trade engine', evaluate_trade: 'trade check', shop_players: 'shop players', get_draft_order: 'draft order', get_player_news: 'news', check_player_risks: 'risk check', get_player_history: 'history', get_lineup_alerts: 'lineup', get_matchups: 'matchups', analyze_start_sit: 'start/sit' };
 function traceHtml(st) {
   if (!st.trace.length && !st.busy) return '';
   const items = st.trace.map(s => s.kind === 'think'
