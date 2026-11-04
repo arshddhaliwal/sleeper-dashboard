@@ -22,24 +22,28 @@
   </form>
 </header>
 <nav class="tabs" id="tabs">
-  <button data-tab="overview" class="on">Overview</button>
+  <button data-tab="week" class="on">This week</button>
   <button data-tab="gm" class="asktab">✦ GM Agent</button>
-  <button data-tab="startsit">Start/Sit</button>
-  <button data-tab="alerts">Alerts <span class="nb" id="alertBadge" style="display:none"></span></button>
   <button data-tab="team">My Team</button>
   <button data-tab="matchups">Matchups</button>
-  <button data-tab="news">News</button>
-  <button data-tab="trades">Trade Finder</button>
-  <button data-tab="check">Trade Calculator</button>
-  <button data-tab="strategy">Strategy</button>
-  <button data-tab="history">History</button>
-  <button data-tab="teams">Teams</button>
-  <button data-tab="players">Players</button>
+  <button data-tab="trades">Trades</button>
+  <div class="more" id="more"><button type="button" id="moreBtn" aria-haspopup="true" aria-expanded="false">More ▾</button>
+    <div class="menu" id="moreMenu">
+      <button data-tab="startsit">Field, weather &amp; defense grades</button>
+      <button data-tab="alerts">Alerts <span class="nb" id="alertBadge" style="display:none"></span></button>
+      <button data-tab="overview">Standings &amp; draft order</button>
+      <button data-tab="news">News</button>
+      <button data-tab="check">Trade Calculator</button>
+      <button data-tab="strategy">Strategy</button>
+      <button data-tab="history">History</button>
+      <button data-tab="teams">Teams</button>
+      <button data-tab="players">Players</button>
+    </div></div>
 </nav>
 <main id="main">
   <section class="empty">
-    <h1>Your Sleeper leagues, live.</h1>
-    <p>Enter your Sleeper username above to load standings, rosters, matchups, draft order and trade ideas.</p>
+    <h1>Who do I start this week?</h1>
+    <p>Enter your Sleeper username and get a START / SIT call for every slot — matchup, weather, betting line and injuries already baked in.</p>
     <p><a class="demobtn" href="/?demo=1">Try the demo</a></p>
     <p class="sub">The demo uses a real dynasty league with every team and manager name hidden.</p>
   </section>
