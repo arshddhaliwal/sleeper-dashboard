@@ -490,7 +490,7 @@ function swapReason(rec, cur) {
   const dn = cur && worst(cur); if (dn && dn.mult < 0.98) return reasonSentence({ ...cur, factors: [dn] });
   return `Projects ${f1(rec.adj)} to ${cur ? f1(cur.adj) : '0'} this week.`;
 }
-function verdictFor(M, x) {
+function slotVerdict(M, x) {
   const flip = M.coinflips.find(c => c.slot === x.slot && x.cur && (c.a.p.id === x.cur.p.id || c.b.p.id === x.cur.p.id));
   if (!x.cur) return { v: 'empty', t: 'Empty', why: x.rec ? `Slot is empty — put in ${x.rec.p.name}.` : 'Slot is empty and nobody on the bench fits.' };
   if (x.cur.bye) return { v: 'bye', t: 'Bye', why: x.rec && x.rec.p.id !== x.cur.p.id ? `${x.cur.p.name} is on bye — start ${x.rec.p.name}.` : `${x.cur.p.name} is on bye and there's no replacement.` };
@@ -513,7 +513,7 @@ function vWeek(L) {
   const sub = oppT ? `vs <b>${esc(oppT.name)}</b> · proj ${f1(projOf(mu))} – ${f1(projOf(opp))}` : 'No matchup this week';
   const open = S.ui.wkopen || null;
   const rows = M.lineup.map(x => {
-    const v = verdictFor(M, x); const r = x.cur;
+    const v = slotVerdict(M, x); const r = x.cur;
     const slot = x.slot.replace('SUPER_FLEX', 'SFLX').replace('WRRB_FLEX', 'W/R').replace('REC_FLEX', 'W/T');
     const key = x.slot + '|' + x.i;
     const det = open === key ? `<div class="vdet"><div class="lbl">Full breakdown</div>${r ? playerLine(L, r, { showRange: true, maxv: Math.max(10, ...M.mine.map(z => z.ceil || 0)) }) : ''}${(() => { const alt = r && M.swapOut[r.p.id] ? M.swapOut[r.p.id].rec : (!r || r.bye || r.out) && x.rec ? x.rec : null; return alt ? `<div class="lbl">Start instead</div>${playerLine(L, alt, { showRange: true, maxv: Math.max(10, ...M.mine.map(z => z.ceil || 0)) })}` : ''; })()}${x.alts.filter(a => !x.rec || a.p.id !== x.rec.p.id).slice(0, 2).map(a => `<div class="lbl">Also eligible</div>${playerLine(L, a, { showRange: false })}`).join('')}</div>` : '';
