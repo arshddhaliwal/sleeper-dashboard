@@ -9,7 +9,7 @@
 // Neutral message format sent by the browser:
 //   { role: 'user', text } | { role: 'assistant', text?, calls?: [{ id, name, args }] } | { role: 'tool', id, name, result }
 
-const VERSION = '2026-11-04.1'; // must match AGENT_VERSION in agent.js
+const VERSION = '2026-11-07.1'; // must match AGENT_VERSION in agent.js
 
 const TOOLS = [
   { name: 'get_league_overview', description: 'League type (dynasty / keeper / redraft), scoring, settings, the standings (rank, record, points, max points, contend-or-rebuild verdict, roster value rank) and which team is the user\'s.', params: {} },
@@ -181,7 +181,10 @@ module.exports = async (req, res) => {
     const ctx = body.context && typeof body.context === 'object' ? body.context : {};
     const system = `${mode === 'gm' ? GM_PROMPT : CHAT_PROMPT}\n\nLoaded league: ${clip(ctx.league, 120)} (${clip(ctx.sport, 10)}, ${clip(ctx.kind, 20)}), week ${clip(ctx.week, 4)}.${ctx.demo ? ' This is the public demo with anonymised names.' : ''}`;
     // only offer tools this copy of the browser app actually implements (an open tab may predate a deploy)
-    const allowed = Array.isArray(body.tools) && body.tools.length ? new Set(body.tools.map(String)) : null;
+    let allowed = Array.isArray(body.tools) && body.tools.length ? new Set(body.tools.map(String)) : null;
+    if (ctx.sport && ctx.sport !== 'nfl') { // the start/sit model needs NFL defenses, weather and lines; don't offer it in NBA leagues
+      allowed = allowed || new Set(TOOLS.map(t => t.name)); allowed.delete('analyze_start_sit');
+    }
     const out = process.env.ANTHROPIC_API_KEY ? await callClaude(mode, system, msgs, allowed) : callMock(mode, msgs);
     out.version = VERSION;
     const known = new Set([...TOOLS, SUBMIT].filter(t => t === SUBMIT || !allowed || allowed.has(t.name)).map(t => t.name));

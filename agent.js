@@ -5,7 +5,7 @@
    runs here in the browser against the loaded league. */
 
 const GM_MAX_ROUNDS = 16, CHAT_MAX_ROUNDS = 8;
-const AGENT_VERSION = '2026-11-04.1'; // must match api/agent.js; a mismatch means this tab is running an old copy of the app
+const AGENT_VERSION = '2026-11-07.1'; // must match api/agent.js; a mismatch means this tab is running an old copy of the app
 
 const plain = s => { const d = document.createElement('div'); d.innerHTML = String(s == null ? '' : s).replace(/<[^>]+>/g, ' '); return d.textContent.replace(/\s+/g, ' ').trim(); };
 const r1 = n => n == null || isNaN(n) ? null : Math.round(n * 10) / 10;
