@@ -269,7 +269,7 @@ function vStartSit(L) {
   if (!M) { ensureStartSit(L).then(() => S.tab === 'startsit' && render()).catch(e => setMain(`<div class="err">${esc(e.message)}</div>`)); return `${leagueMeta(L)}<div class="loading">Grading defenses, pulling kickoff forecasts and betting lines…</div>`; }
   const view = S.ui.ssview || 'field';
   const seg = `<div class="controls"><div class="seg">${[['lineup', 'My lineup'], ['field', 'Field'], ['games', 'Game environment'], ['defense', 'Defense grades']].map(([k, l]) => `<button data-ssview="${k}" class="${view === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-    <span class="sub">Week ${L.curWeek} · grades use ${M.def.weeks.length} week${M.def.weeks.length === 1 ? '' : 's'} of games in this league's scoring</span></div>`;
+    ${weekNav(L)}<span class="sub">grades use ${M.def.weeks.length} week${M.def.weeks.length === 1 ? '' : 's'} of games in this league's scoring</span></div>`;
   if (!M.mine) return `${leagueMeta(L)}${seg}${view === 'games' ? ssGames(L, M) : view === 'defense' ? ssDefense(L, M) : view === 'field' ? ssField(L, M) : '<div class="card">You don\'t have a team in this league.</div>'}`;
   const body = view === 'games' ? ssGames(L, M) : view === 'defense' ? ssDefense(L, M) : view === 'field' ? ssField(L, M) : ssLineup(L, M);
   return `${leagueMeta(L)}${seg}${body}`;
@@ -502,7 +502,7 @@ function slotVerdict(M, x) {
 }
 function vWeek(L) {
   if (!L.me) return `${leagueMeta(L)}<div class="card">You don't have a team in this league.</div>`;
-  const head = (sub) => `<div class="wkhead"><h1>Week ${L.curWeek}</h1><span class="sub">${sub}</span></div>`;
+  const head = (sub) => `<div class="wkhead"><h1>${weekNav(L)}</h1><span class="sub">${sub}</span></div>`;
   if (L.sport !== 'nfl') return `${leagueMeta(L)}${head('Start/sit calls are NFL only — here are your matchups.')}${vMatchups(L)}`;
   const M = S.ss && S.ss.key === `${L.league.league_id}|${L.league.season}|${L.curWeek}` && S.ss.model;
   if (!M) { ensureStartSit(L).then(() => S.tab === 'week' && render()).catch(e => setMain(`<div class="err">${esc(e.message)}</div>`)); return `${leagueMeta(L)}${head('')}<div class="loading">Checking matchups, weather, lines and injuries…</div>`; }
