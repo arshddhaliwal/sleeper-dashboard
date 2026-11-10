@@ -332,3 +332,10 @@ details summary{cursor:pointer;color:var(--mute);font-size:13px;margin-top:10px}
 .wkfoot a,.wkfoot button{background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:7px 12px;font-size:13px;color:var(--text);cursor:pointer;text-decoration:none;font-weight:600}
 @media (max-width:720px){.vrow{grid-template-columns:48px 1fr auto;gap:8px}.vrow .who .hs{width:34px;height:34px}.vd{width:48px;font-size:10px}}
 @media (max-width:720px){.userform input{flex:1 1 100%;width:auto}.userform select{flex:1 1 140px;max-width:none}}
+
+.wknav{display:inline-flex;align-items:center;gap:6px}
+.wknav b{font-size:inherit}
+.wknav button{background:var(--panel2);border:1px solid var(--line);border-radius:8px;color:var(--text);width:30px;height:30px;font-size:18px;line-height:1;cursor:pointer;font-weight:700}
+.wknav button:disabled{opacity:.35;cursor:default}
+.wknav .linkbtn{width:auto;height:auto;background:none;border:0;font-size:12px;color:var(--accent);padding:0 4px}
+.wkhead h1 .wknav b{font-size:22px}

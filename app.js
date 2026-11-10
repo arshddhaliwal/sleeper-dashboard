@@ -115,7 +115,16 @@ async function loadLeague(id) {
     const sport = league.sport;
     const st = S.states[sport] || await j(`${API}/state/${sport}`, {});
     const season = league.season;
-    const curWeek = Math.max(1, (st.season === season ? (st.display_week || st.week) : 0) || league.settings.last_scored_leg || 1);
+    // Sleeper's display_week lags its real week until midweek; once every game of the displayed week is final, move on
+    // to the upcoming week (that's the one you set a lineup for). A viewer can also pick any week with the ‹ › controls.
+    let curWeek = Math.max(1, (st.season === season ? (st.display_week || st.week) : 0) || league.settings.last_scored_leg || 1);
+    if (sport === 'nfl' && st.season === season && st.week > curWeek) {
+      const sched = await jc(`https://api.sleeper.app/schedule/nfl/regular/${season}`, []);
+      const shown = sched.filter(g => g.week === curWeek);
+      if (shown.length && shown.every(g => g.status === 'complete')) curWeek = st.week;
+    }
+    S.liveWeek = curWeek;
+    if (S.wk && S.wk.league === id && S.wk.week !== curWeek) curWeek = Math.max(1, Math.min(18, S.wk.week)); else S.wk = null;
     const startWeek = league.settings.start_week || 1;
     const weeks = []; for (let w = startWeek; w <= curWeek; w++) weeks.push(w);
     const sc = league.scoring_settings || {};
@@ -323,6 +332,11 @@ function spark(L, p) {
   return `<svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
 const rec = t => `${t.wins}-${t.losses}${t.ties ? '-' + t.ties : ''}`;
+// ‹ Week N › picker; changing it reloads the league at that week (projections, matchups, start/sit all follow)
+function weekNav(L) {
+  const w = L.curWeek, max = L.sport === 'nfl' ? 18 : 30;
+  return `<span class="wknav"><button data-week="${w - 1}" ${w <= 1 ? 'disabled' : ''} aria-label="Previous week">‹</button><b>Week ${w}</b><button data-week="${w + 1}" ${w >= max ? 'disabled' : ''} aria-label="Next week">›</button>${S.liveWeek && S.liveWeek !== w ? `<button class="linkbtn" data-week="${S.liveWeek}">now</button>` : ''}</span>`;
+}
 function leagueMeta(L) {
   const st = L.league.settings, sc = L.scoring;
   const bits = [`${L.teams.length} teams`];
@@ -462,7 +476,7 @@ function vMatchups(L) {
       <div class="bar"><i style="width:${pctA.toFixed(1)}%"></i><b style="width:${(100 - pctA).toFixed(1)}%"></b></div>
       <details><summary>Starters</summary><div class="grid g2" style="margin-top:8px"><div class="tw"><table>${list(A)}</table></div><div class="tw"><table>${list(B)}</table></div></div></details></div>`;
   }).join('');
-  return `<div class="hint">Week ${L.curWeek}. Grey numbers ending in “p” are projections for players who haven't played yet; projected final = current score + remaining projections.${L.sport === 'nba' ? ' NBA projections are per period and approximate.' : ''}</div><div class="grid g2">${cards || '<div class="card">No matchups this week.</div>'}</div>`;
+  return `<div class="controls">${weekNav(L)}</div><div class="hint">Grey numbers ending in “p” are projections for players who haven't played yet; projected final = current score + remaining projections.${L.sport === 'nba' ? ' NBA projections are per period and approximate.' : ''}</div><div class="grid g2">${cards || '<div class="card">No matchups this week.</div>'}</div>`;
 }
 
 /* ---------- Teams ---------- */
@@ -518,6 +532,7 @@ function vPlayers(L) {
 function bind() {
   const L = S.L;
   document.querySelectorAll('[data-rule]').forEach(b => b.onclick = () => { store.set(b.parentElement.dataset.ruleKey, b.dataset.rule); render(); });
+  document.querySelectorAll('[data-week]').forEach(b => b.onclick = () => { S.wk = { league: L.league.league_id, week: +b.dataset.week }; S.ss = null; loadLeague(L.league.league_id); });
   document.querySelectorAll('[data-rsort]').forEach(b => b.onclick = () => { S.ui.rsort = b.dataset.rsort; render(); });
   document.querySelectorAll('[data-keep]').forEach(c => c.onchange = () => {
     const k = 'sd_keep_' + L.league.league_id; const set = new Set(store.get(k, []));
